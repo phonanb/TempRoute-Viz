@@ -1,0 +1,5 @@
+{
+  "name": "Animated Temperature Route Map",
+  "description": "Visualize GPS routes with animated temperature data overlays and historical trails.",
+  "requestFramePermissions": []
+}
