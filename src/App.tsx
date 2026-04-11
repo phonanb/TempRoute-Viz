@@ -25,11 +25,15 @@ import {
   Eye,
   EyeOff,
   Flame,
-  FileText
+  FileText,
+  Share2,
+  Link as LinkIcon,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { cn } from './lib/utils';
+import LZString from 'lz-string';
 
 export default function App() {
   const [data, setData] = useState<GPSData[]>([]);
@@ -46,6 +50,8 @@ export default function App() {
   const [showHighTempLayer, setShowHighTempLayer] = useState(false);
   const [focusedEventIndex, setFocusedEventIndex] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareSuccess, setShareSuccess] = useState(false);
 
   const heatEvents = useMemo(() => {
     if (data.length === 0) return [];
@@ -113,6 +119,96 @@ export default function App() {
       document.documentElement.classList.remove('dark');
     }
   }, [isDarkMode]);
+
+  // Load shared data from URL
+  useEffect(() => {
+    const loadFromUrl = () => {
+      // Try hash first (supports larger data), then fallback to query params for backward compatibility
+      let encodedData = null;
+      let encodedName = null;
+
+      if (window.location.hash && window.location.hash.startsWith('#d=')) {
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        encodedData = hashParams.get('d');
+        encodedName = hashParams.get('n');
+      } else {
+        const queryParams = new URLSearchParams(window.location.search);
+        encodedData = queryParams.get('d');
+        encodedName = queryParams.get('n');
+      }
+      
+      if (encodedData) {
+        try {
+          const decompressed = LZString.decompressFromEncodedURIComponent(encodedData);
+          if (decompressed) {
+            const parsed = JSON.parse(decompressed);
+            // Convert string dates back to Date objects
+            const restored = parsed.map((p: any) => ({
+              ...p,
+              time: new Date(p.time)
+            }));
+            setData(restored);
+            if (encodedName) setFileName(decodeURIComponent(encodedName));
+            setCurrentIndex(0);
+            setIsPlaying(true);
+            
+            // Clean up URL to keep it tidy (optional)
+            // window.history.replaceState(null, '', window.location.pathname);
+          }
+        } catch (err) {
+          console.error("Failed to load shared data", err);
+          setError("Failed to load shared data from URL.");
+        }
+      }
+    };
+
+    loadFromUrl();
+    // Listen for hash changes if user pastes a new link while app is open
+    window.addEventListener('hashchange', loadFromUrl);
+    return () => window.removeEventListener('hashchange', loadFromUrl);
+  }, []);
+
+  const generateShareLink = () => {
+    if (data.length === 0) return;
+    
+    setIsSharing(true);
+    try {
+      // Create a smaller version of data for sharing
+      const minimalData = data.map(p => ({
+        lat: p.lat,
+        long: p.long,
+        temp: p.temp,
+        time: p.time,
+        location: p.location
+      }));
+
+      const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(minimalData));
+      
+      // Use Hash (#) instead of Query (?) to support much larger data (up to several MB in modern browsers)
+      // and avoid server-side URL length limits.
+      const url = new URL(window.location.origin + window.location.pathname);
+      const hashParams = new URLSearchParams();
+      hashParams.set('d', compressed);
+      if (fileName) hashParams.set('n', encodeURIComponent(fileName));
+      
+      url.hash = hashParams.toString();
+      const finalUrl = url.toString();
+      
+      // Modern browsers handle very large hashes, but we'll still warn if it's extreme
+      if (finalUrl.length > 1000000) { // 1MB limit for safety
+        setError("Data is extremely large. The link might not work in all browsers.");
+      }
+      
+      navigator.clipboard.writeText(finalUrl);
+      setShareSuccess(true);
+      setTimeout(() => setShareSuccess(false), 3000);
+    } catch (err) {
+      console.error("Failed to generate share link", err);
+      setError("Failed to generate share link.");
+    } finally {
+      setIsSharing(false);
+    }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -212,6 +308,22 @@ export default function App() {
           >
             {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </Button>
+
+          {data.length > 0 && (
+            <Button
+              variant={shareSuccess ? "default" : "outline"}
+              size="sm"
+              onClick={generateShareLink}
+              disabled={isSharing}
+              className={cn(
+                "hidden sm:flex items-center gap-2 transition-all",
+                shareSuccess ? "bg-green-500 hover:bg-green-600 border-green-500 text-white" : (isDarkMode ? "border-slate-700 text-slate-300" : "border-slate-200")
+              )}
+            >
+              {shareSuccess ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+              {shareSuccess ? 'Link Copied!' : 'Share Link'}
+            </Button>
+          )}
 
           <div className="relative">
             <Input
