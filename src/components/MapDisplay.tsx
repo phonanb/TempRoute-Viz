@@ -4,7 +4,10 @@ import L from 'leaflet';
 import { GPSData } from '../types';
 import { getTempColor } from '../lib/data-processor';
 import { format } from 'date-fns';
+import { formatInTimeZone } from 'date-fns-tz';
 import { cn } from '../lib/utils';
+
+const TIMEZONE = 'Asia/Bangkok';
 
 // Fix for default marker icons in Leaflet + Vite
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -128,8 +131,8 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({
                   <div className="text-xs">
                     <p className="font-bold text-orange-600">High Temp Alert (&gt;30°C)</p>
                     <p>Temp: {p.temp.toFixed(1)}°C</p>
-                    <p>Time: {format(p.time, 'HH:mm:ss')}</p>
-                    <p>Date: {format(p.time, 'dd/MM/yyyy')}</p>
+                    <p>Time: {formatInTimeZone(p.time, TIMEZONE, 'HH:mm:ss')}</p>
+                    <p>Date: {formatInTimeZone(p.time, TIMEZONE, 'dd/MM/yyyy')}</p>
                   </div>
                 </Popup>
               </CircleMarker>
@@ -178,9 +181,9 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({
                         </p>
                         <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
                           <span className="text-slate-500 dark:text-slate-400">Date:</span>
-                          <span className="font-medium dark:text-slate-200">{format(p.time, 'dd/MM/yyyy')}</span>
+                          <span className="font-medium dark:text-slate-200">{formatInTimeZone(p.time, TIMEZONE, 'dd/MM/yyyy')}</span>
                           <span className="text-slate-500 dark:text-slate-400">Time:</span>
-                          <span className="font-medium dark:text-slate-200">{format(p.time, 'HH:mm:ss')}</span>
+                          <span className="font-medium dark:text-slate-200">{formatInTimeZone(p.time, TIMEZONE, 'HH:mm:ss')}</span>
                           <span className="text-slate-500 dark:text-slate-400">Temp:</span>
                           <span className="font-medium text-red-500">{p.temp.toFixed(1)}°C</span>
                         </div>
@@ -212,9 +215,9 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({
                 </p>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
                   <span className="text-slate-500 dark:text-slate-400">Date:</span>
-                  <span className="font-medium dark:text-slate-200">{format(currentPoint.time, 'dd/MM/yyyy')}</span>
+                  <span className="font-medium dark:text-slate-200">{formatInTimeZone(currentPoint.time, TIMEZONE, 'dd/MM/yyyy')}</span>
                   <span className="text-slate-500 dark:text-slate-400">Time:</span>
-                  <span className="font-medium dark:text-slate-200">{format(currentPoint.time, 'HH:mm:ss')}</span>
+                  <span className="font-medium dark:text-slate-200">{formatInTimeZone(currentPoint.time, TIMEZONE, 'HH:mm:ss')}</span>
                   <span className="text-slate-500 dark:text-slate-400">Temp:</span>
                   <span className="font-medium text-red-500">{currentPoint.temp.toFixed(1)}°C</span>
                   <span className="text-slate-500 dark:text-slate-400">Location:</span>

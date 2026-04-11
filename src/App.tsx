@@ -32,8 +32,11 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
+import { formatInTimeZone } from 'date-fns-tz';
 import { cn } from './lib/utils';
 import LZString from 'lz-string';
+
+const TIMEZONE = 'Asia/Bangkok';
 
 export default function App() {
   const [data, setData] = useState<GPSData[]>([]);
@@ -52,6 +55,7 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [shareSuccess, setShareSuccess] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   const heatEvents = useMemo(() => {
     if (data.length === 0) return [];
@@ -259,44 +263,42 @@ export default function App() {
 
   return (
     <div className={cn(
-      "flex flex-col h-screen font-sans",
+      "flex flex-col h-screen font-sans overflow-hidden",
       isDarkMode ? "bg-slate-950 text-slate-50" : "bg-slate-50 text-slate-900"
     )}>
       {/* Header */}
       <header className={cn(
-        "h-16 border-b flex items-center px-6 justify-between shrink-0 z-10",
+        "h-16 border-b flex items-center px-4 md:px-6 justify-between shrink-0 z-50",
         isDarkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
       )}>
-        <div className="flex items-center gap-3">
-          <div className="bg-red-500 p-2 rounded-lg">
-            <Thermometer className="w-5 h-5 text-white" />
+        <div className="flex items-center gap-2 md:gap-3">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className="flex"
+          >
+            <MapIcon className="w-5 h-5" />
+          </Button>
+          <div className="bg-red-500 p-1.5 md:p-2 rounded-lg hidden xs:block">
+            <Thermometer className="w-4 h-4 md:w-5 md:h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-lg font-bold tracking-tight">TempRoute Viz</h1>
+            <h1 className="text-sm md:text-lg font-bold tracking-tight">TempRoute Viz</h1>
             <p className={cn(
-              "text-[10px] uppercase tracking-widest font-semibold",
+              "text-[8px] md:text-[10px] uppercase tracking-widest font-semibold",
               isDarkMode ? "text-slate-400" : "text-slate-500"
-            )}>Animated GPS Analysis</p>
+            )}>GPS Analysis</p>
           </div>
         </div>
 
-        {fileName && (
-          <div className={cn(
-            "hidden md:flex items-center gap-2 px-4 py-1.5 rounded-full border border-dashed animate-in fade-in slide-in-from-top-2",
-            isDarkMode ? "border-slate-700 bg-slate-800/50 text-slate-400" : "border-slate-300 bg-slate-50 text-slate-500"
-          )}>
-            <FileText className="w-3.5 h-3.5" />
-            <span className="text-xs font-medium truncate max-w-[200px]">{fileName}</span>
-          </div>
-        )}
-
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 md:gap-4">
           {data.length > 0 && (
             <Badge variant="secondary" className={cn(
-              "border transition-colors duration-300",
+              "hidden lg:flex border transition-colors duration-300",
               isDarkMode ? "bg-slate-800 text-slate-300 border-slate-700" : "bg-slate-100 text-slate-600 border-slate-200"
             )}>
-              {data.length} Data Points
+              {data.length} Points
             </Badge>
           )}
           
@@ -304,7 +306,7 @@ export default function App() {
             variant="ghost"
             size="icon"
             onClick={() => setIsDarkMode(!isDarkMode)}
-            className="rounded-full"
+            className="rounded-full w-8 h-8 md:w-10 md:h-10"
           >
             {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </Button>
@@ -316,12 +318,12 @@ export default function App() {
               onClick={generateShareLink}
               disabled={isSharing}
               className={cn(
-                "hidden sm:flex items-center gap-2 transition-all",
+                "flex items-center gap-2 transition-all h-8 md:h-9 px-2 md:px-3",
                 shareSuccess ? "bg-green-500 hover:bg-green-600 border-green-500 text-white" : (isDarkMode ? "border-slate-700 text-slate-300" : "border-slate-200")
               )}
             >
               {shareSuccess ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
-              {shareSuccess ? 'Link Copied!' : 'Share Link'}
+              <span className="hidden sm:inline">{shareSuccess ? 'Copied!' : 'Share'}</span>
             </Button>
           )}
 
@@ -337,60 +339,49 @@ export default function App() {
               htmlFor="file-upload" 
               className={cn(
                 buttonVariants({ variant: isDarkMode ? "outline" : "default", size: "sm" }), 
-                "flex items-center gap-2 cursor-pointer transition-all active:scale-95",
+                "flex items-center gap-2 cursor-pointer transition-all active:scale-95 h-8 md:h-9 px-2 md:px-3",
                 isDarkMode ? "border-slate-700 text-slate-200 hover:bg-slate-800" : "bg-slate-900 text-white hover:bg-slate-800"
               )}
             >
               <Upload className="w-4 h-4" />
-              {data.length > 0 ? 'Change File' : 'Upload Data'}
+              <span className="hidden sm:inline">{data.length > 0 ? 'Change' : 'Upload'}</span>
             </label>
           </div>
         </div>
       </header>
 
-      <main className="flex flex-1 overflow-hidden">
+      <main className="flex flex-1 overflow-hidden relative">
+        {/* Sidebar Overlay */}
+        {isSidebarOpen && (
+          <div 
+            className="absolute inset-0 bg-black/40 z-[1500] backdrop-blur-[2px] transition-all duration-300" 
+            onClick={() => setIsSidebarOpen(false)}
+          />
+        )}
+        
         {/* Sidebar Controls */}
         <aside className={cn(
-          "w-80 border-r overflow-y-auto p-6 flex flex-col gap-6 shrink-0",
-          isDarkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+          "absolute z-[1600] h-full w-72 md:w-80 border-r overflow-y-auto p-6 flex flex-col gap-6 shrink-0 transition-transform duration-300 ease-in-out shadow-2xl",
+          isDarkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200",
+          isSidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}>
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Controls</span>
+            <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(false)}>
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </Button>
+          </div>
           <section>
             <h2 className={cn(
               "text-xs font-bold uppercase tracking-wider mb-4 flex items-center gap-2",
               isDarkMode ? "text-slate-400" : "text-slate-500"
             )}>
               <Info className="w-3 h-3" />
-              Playback Controls
+              Playback Settings
             </h2>
             <div className="space-y-6">
-              <div className="flex items-center justify-center gap-2">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setCurrentIndex(0)}
-                  disabled={data.length === 0}
-                  className={cn(
-                    "rounded-full",
-                    isDarkMode ? "border-slate-700 hover:bg-slate-800" : ""
-                  )}
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </Button>
-                <Button
-                  size="lg"
-                  variant={isPlaying ? "outline" : "default"}
-                  className={cn(
-                    "w-16 h-16 rounded-full shadow-lg transition-all",
-                    !isPlaying ? 'bg-red-500 hover:bg-red-600' : (isDarkMode ? 'border-slate-700 hover:bg-slate-800' : '')
-                  )}
-                  onClick={() => setIsPlaying(!isPlaying)}
-                  disabled={data.length === 0}
-                >
-                  {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 fill-current" />}
-                </Button>
-                <div className="w-10" /> {/* Spacer */}
-              </div>
-
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
                   <Label className="text-sm font-medium">Speed</Label>
@@ -516,7 +507,7 @@ export default function App() {
                               Heat Event #{idx + 1}
                             </span>
                             <span className="text-[8px] text-slate-400 font-bold uppercase mt-0.5">
-                              {format(event.startTime, 'EEEE, dd MMMM yyyy')}
+                              {formatInTimeZone(event.startTime, TIMEZONE, 'EEEE, dd MMMM yyyy')}
                             </span>
                           </div>
                           <Badge variant="outline" className="text-[8px] h-5 px-1.5 border-orange-200 text-orange-600 bg-orange-50/50 dark:bg-orange-900/20 dark:border-orange-800">
@@ -527,11 +518,11 @@ export default function App() {
                         <div className="grid grid-cols-2 gap-2">
                           <div className="flex flex-col">
                             <span className="text-slate-500 uppercase tracking-tighter font-bold">Start</span>
-                            <span className="font-mono text-slate-700 dark:text-slate-300">{format(event.startTime, 'HH:mm:ss')}</span>
+                            <span className="font-mono text-slate-700 dark:text-slate-300">{formatInTimeZone(event.startTime, TIMEZONE, 'HH:mm:ss')}</span>
                           </div>
                           <div className="flex flex-col">
                             <span className="text-slate-500 uppercase tracking-tighter font-bold">End</span>
-                            <span className="font-mono text-slate-700 dark:text-slate-300">{format(event.endTime, 'HH:mm:ss')}</span>
+                            <span className="font-mono text-slate-700 dark:text-slate-300">{formatInTimeZone(event.endTime, TIMEZONE, 'HH:mm:ss')}</span>
                           </div>
                         </div>
 
@@ -569,52 +560,6 @@ export default function App() {
               </div>
             </div>
           </section>
-
-          <section className="mt-auto">
-            {currentPoint ? (
-              <Card className={cn(
-                "border shadow-sm",
-                isDarkMode ? "bg-slate-950/50 border-slate-800" : "bg-slate-50/50 border-slate-200"
-              )}>
-                <CardHeader className="p-4 pb-2">
-                  <CardTitle className="text-sm font-bold flex items-center gap-2">
-                    <MapIcon className="w-4 h-4 text-slate-400" />
-                    Current Point
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-4 pt-0 space-y-3">
-                  <div className={cn(
-                    "flex justify-between items-center py-2 border-b",
-                    isDarkMode ? "border-slate-800" : "border-slate-100"
-                  )}>
-                    <span className="text-xs text-slate-500">Time</span>
-                    <span className="text-xs font-mono font-bold">{format(currentPoint.time, 'HH:mm:ss')}</span>
-                  </div>
-                  <div className={cn(
-                    "flex justify-between items-center py-2 border-b",
-                    isDarkMode ? "border-slate-800" : "border-slate-100"
-                  )}>
-                    <span className="text-xs text-slate-500">Temp</span>
-                    <span className="text-sm font-bold text-red-500">{currentPoint.temp.toFixed(1)}°C</span>
-                  </div>
-                  <div className="flex justify-between items-center py-2">
-                    <span className="text-xs text-slate-500">Location</span>
-                    <span className="text-[10px] font-medium text-right max-w-[120px] truncate">
-                      {currentPoint.location || 'N/A'}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className={cn(
-                "text-center p-8 border-2 border-dashed rounded-xl transition-colors duration-300",
-                isDarkMode ? "border-slate-800" : "border-slate-200"
-              )}>
-                <Upload className="w-8 h-8 text-slate-300 mx-auto mb-3" />
-                <p className="text-xs text-slate-400 font-medium">Upload a file to start visualization</p>
-              </div>
-            )}
-          </section>
         </aside>
 
         {/* Map Area */}
@@ -641,6 +586,42 @@ export default function App() {
 
           {data.length > 0 ? (
             <>
+              {/* Current Point Top Bar */}
+              <div className={cn(
+                "absolute top-4 left-1/2 -translate-x-1/2 z-[1000] backdrop-blur-md px-3 py-2 md:px-6 md:py-3 rounded-full border shadow-xl flex items-center gap-3 md:gap-10 transition-all duration-300 max-w-[95%] md:max-w-none",
+                isDarkMode ? "bg-slate-900/90 border-slate-800" : "bg-white/90 border-slate-200"
+              )}>
+                <div className="flex items-center gap-1.5 md:gap-2">
+                  <Clock className="w-3 h-3 md:w-3.5 md:h-3.5 text-slate-400" />
+                  <div className="flex flex-col">
+                    <span className="hidden md:block text-[8px] uppercase font-bold text-slate-500 leading-none mb-0.5">Time</span>
+                    <span className="text-[10px] md:text-xs font-mono font-bold leading-none">
+                      {formatInTimeZone(currentPoint.time, TIMEZONE, 'HH:mm:ss')}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 md:gap-2">
+                  <Thermometer className="w-3 h-3 md:w-3.5 md:h-3.5 text-red-500" />
+                  <div className="flex flex-col">
+                    <span className="hidden md:block text-[8px] uppercase font-bold text-slate-500 leading-none mb-0.5">Temp</span>
+                    <span className="text-[10px] md:text-xs font-bold text-red-500 leading-none">
+                      {currentPoint.temp.toFixed(1)}°C
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 md:gap-2 max-w-[80px] sm:max-w-[150px] md:max-w-[300px]">
+                  <MapIcon className="w-3 h-3 md:w-3.5 md:h-3.5 text-blue-500" />
+                  <div className="flex flex-col overflow-hidden">
+                    <span className="hidden md:block text-[8px] uppercase font-bold text-slate-500 leading-none mb-0.5">Location</span>
+                    <span className="text-[9px] md:text-[10px] font-bold truncate leading-none">
+                      {currentPoint.location || 'N/A'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <MapDisplay 
                 data={data} 
                 currentIndex={currentIndex} 
@@ -656,34 +637,57 @@ export default function App() {
               
               {/* Timeline Slider Overlay */}
               <div className={cn(
-                "absolute bottom-8 left-1/2 -translate-x-1/2 w-[70%] z-[1000] backdrop-blur-md p-6 rounded-2xl border shadow-2xl",
+                "absolute bottom-4 md:bottom-8 left-1/2 -translate-x-1/2 w-[90%] md:w-[70%] z-[1000] backdrop-blur-md p-4 md:p-6 rounded-xl md:rounded-2xl border shadow-2xl",
                 isDarkMode ? "bg-slate-900/95 border-slate-800" : "bg-white/95 border-slate-200"
               )}>
-                <div className="flex flex-col gap-4">
-                  <div className="flex justify-between items-center px-2">
+                <div className="flex flex-col gap-2 md:gap-4">
+                  <div className="flex justify-between items-center px-1 md:px-2">
                     <div className="flex flex-col">
-                      <span className="text-[10px] uppercase tracking-widest font-bold text-slate-400">Current Time</span>
-                      <div key={`time-${currentIndex}`} className="flex items-baseline gap-2 text-red-500">
-                        <span className="text-xs font-bold">
-                          {currentPoint ? format(currentPoint.time, 'dd/MM') : '--/--'}
+                      <span className="text-[8px] md:text-[10px] uppercase tracking-widest font-bold text-slate-400">Current Time</span>
+                      <div key={`time-${currentIndex}`} className="flex items-baseline gap-1 md:gap-2 text-red-500">
+                        <span className="text-[10px] md:text-xs font-bold">
+                          {currentPoint ? formatInTimeZone(currentPoint.time, TIMEZONE, 'dd/MM') : '--/--'}
                         </span>
-                        <span className="text-sm font-mono font-bold">
-                          {currentPoint ? format(currentPoint.time, 'HH:mm:ss') : '--:--:--'}
+                        <span className="text-xs md:text-sm font-mono font-bold">
+                          {currentPoint ? formatInTimeZone(currentPoint.time, TIMEZONE, 'HH:mm:ss') : '--:--:--'}
                         </span>
                       </div>
                     </div>
                     <div className="flex flex-col items-end">
-                      <span className="text-[10px] uppercase tracking-widest font-bold text-slate-400">Progress</span>
-                      <span key={`progress-${currentIndex}`} className="text-sm font-mono font-bold">
+                      <span className="text-[8px] md:text-[10px] uppercase tracking-widest font-bold text-slate-400">Progress</span>
+                      <span key={`progress-${currentIndex}`} className="text-xs md:text-sm font-mono font-bold">
                         {Math.round((currentIndex / (data.length - 1)) * 100)}%
                       </span>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4">
-                    <span className="text-[10px] font-mono font-bold text-slate-400 w-16">
-                      {format(data[0].time, 'HH:mm')}
-                    </span>
+                  <div className="flex items-center gap-3 md:gap-4">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setCurrentIndex(0)}
+                        disabled={data.length === 0}
+                        className={cn(
+                          "rounded-full w-8 h-8 md:w-10 md:h-10 shrink-0",
+                          isDarkMode ? "border-slate-700 hover:bg-slate-800" : "border-slate-200"
+                        )}
+                      >
+                        <RotateCcw className="w-3 h-3 md:w-4 md:h-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant={isPlaying ? "outline" : "default"}
+                        className={cn(
+                          "w-8 h-8 md:w-10 md:h-10 rounded-full shadow-md transition-all shrink-0",
+                          !isPlaying ? 'bg-red-500 hover:bg-red-600 text-white' : (isDarkMode ? 'border-slate-700 hover:bg-slate-800' : 'border-slate-200')
+                        )}
+                        onClick={() => setIsPlaying(!isPlaying)}
+                        disabled={data.length === 0}
+                      >
+                        {isPlaying ? <Pause className="w-3 h-3 md:w-4 md:h-4" /> : <Play className="w-3 h-3 md:w-4 md:h-4 fill-current" />}
+                      </Button>
+                    </div>
                     <Slider
                       value={[currentIndex]}
                       min={0}
@@ -702,9 +706,6 @@ export default function App() {
                       onPointerUp={() => setIsDragging(false)}
                       className="flex-1"
                     />
-                    <span className="text-[10px] font-mono font-bold text-slate-400 w-16 text-right">
-                      {format(data[data.length - 1].time, 'HH:mm')}
-                    </span>
                   </div>
                 </div>
               </div>

@@ -1,6 +1,9 @@
 import { parse } from 'papaparse';
 import * as XLSX from 'xlsx';
 import { GPSData } from '../types';
+import { fromZonedTime } from 'date-fns-tz';
+
+const TIMEZONE = 'Asia/Bangkok';
 
 export const cleanGPSData = (data: any[]): { cleaned: GPSData[], locationCol: string | null } => {
   const colMap: Record<string, string> = {};
@@ -25,9 +28,13 @@ export const cleanGPSData = (data: any[]): { cleaned: GPSData[], locationCol: st
       let time: Date | null = null;
       
       if (timeVal instanceof Date) {
-        time = timeVal;
+        // If it's already a Date (from XLSX), we treat its "local" time as Bangkok time
+        // We need to convert it to the correct UTC time that represents that local time in Bangkok
+        const isoStr = timeVal.toISOString().replace('Z', ''); // Remove Z to treat as naive
+        time = fromZonedTime(isoStr, TIMEZONE);
       } else if (typeof timeVal === 'string') {
-        const parsed = new Date(timeVal);
+        // Try to parse as naive date string in Bangkok timezone
+        const parsed = fromZonedTime(timeVal, TIMEZONE);
         if (!isNaN(parsed.getTime())) {
           time = parsed;
         } else {
@@ -37,12 +44,19 @@ export const cleanGPSData = (data: any[]): { cleaned: GPSData[], locationCol: st
             const hours = parseInt(timeMatch[1]);
             const minutes = parseInt(timeMatch[2]);
             const seconds = timeMatch[3] ? parseInt(timeMatch[3]) : 0;
-            time = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, seconds);
+            
+            // Create a string that fromZonedTime can handle
+            const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            time = fromZonedTime(dateStr, TIMEZONE);
           }
         }
       } else if (typeof timeVal === 'number') {
         if (timeVal > 40000 && timeVal < 60000) {
-          time = new Date((timeVal - 25569) * 86400 * 1000);
+          // Excel date serial
+          const ms = (timeVal - 25569) * 86400 * 1000;
+          const date = new Date(ms);
+          const isoStr = date.toISOString().replace('Z', '');
+          time = fromZonedTime(isoStr, TIMEZONE);
         } else {
           time = new Date(timeVal);
         }
