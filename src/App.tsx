@@ -28,7 +28,9 @@ import {
   FileText,
   Share2,
   Link as LinkIcon,
-  Check
+  Check,
+  Pin,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -56,6 +58,125 @@ export default function App() {
   const [isSharing, setIsSharing] = useState(false);
   const [shareSuccess, setShareSuccess] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isPinned, setIsPinned] = useState(false);
+
+  const exportToHtml = () => {
+    if (data.length === 0) return;
+    
+    const jsonData = JSON.stringify(data);
+    const title = fileName ? `TempRoute Viz - ${fileName}` : 'TempRoute Viz Export';
+    
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>${title}</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        #map { height: 100vh; width: 100vw; }
+        .info-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 300px;
+        }
+        .legend {
+            position: absolute;
+            bottom: 30px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .legend-item { display: flex; align-items: center; margin-bottom: 4px; }
+        .legend-color { width: 20px; height: 10px; margin-right: 8px; border-radius: 2px; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="info-panel">
+        <h3 style="margin: 0 0 10px 0;">${title}</h3>
+        <p style="font-size: 12px; color: #666; margin: 0;">Total Points: ${data.length}</p>
+    </div>
+    <div class="legend">
+        <div class="legend-item"><div class="legend-color" style="background: #3b82f6;"></div> &lt; 20°C (Cool)</div>
+        <div class="legend-item"><div class="legend-color" style="background: rgb(34, 197, 94);"></div> 30°C (Normal)</div>
+        <div class="legend-item"><div class="legend-color" style="background: #ef4444;"></div> &gt; 40°C (Hot)</div>
+    </div>
+
+    <script>
+        const data = ${jsonData};
+        const map = L.map('map').setView([data[0].lat, data[0].long], 13);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        function getTempColor(t) {
+            if (t < 20) return '#3b82f6';
+            if (t >= 40) return '#ef4444';
+            if (t < 30) {
+                const ratio = (t - 20) / 10;
+                const r = Math.floor(59 + (34 - 59) * ratio);
+                const g = Math.floor(130 + (197 - 130) * ratio);
+                const b = Math.floor(246 + (94 - 246) * ratio);
+                return "rgb(" + r + "," + g + "," + b + ")";
+            } else {
+                const ratio = (t - 30) / 10;
+                const r = Math.floor(34 + (239 - 34) * ratio);
+                const g = Math.floor(197 + (68 - 197) * ratio);
+                const b = Math.floor(94 + (68 - 94) * ratio);
+                return "rgb(" + r + "," + g + "," + b + ")";
+            }
+        }
+
+        const points = data.map(p => [p.lat, p.long]);
+        
+        // Draw path
+        for (let i = 1; i < data.length; i++) {
+            L.polyline([
+                [data[i-1].lat, data[i-1].long],
+                [data[i].lat, data[i].long]
+            ], {
+                color: getTempColor(data[i].temp),
+                weight: 4,
+                opacity: 0.8
+            }).addTo(map);
+        }
+
+        // Add markers for start and end
+        L.marker([data[0].lat, data[0].long]).addTo(map).bindPopup('Start Point');
+        L.marker([data[data.length-1].lat, data[data.length-1].long]).addTo(map).bindPopup('End Point');
+
+        if (points.length > 0) {
+            map.fitBounds(L.polyline(points).getBounds());
+        }
+    </script>
+</body>
+</html>
+    `;
+    
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName ? `${fileName.split('.')[0]}_viz.html` : 'temproute_viz.html';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   const heatEvents = useMemo(() => {
     if (data.length === 0) return [];
@@ -352,7 +473,7 @@ export default function App() {
 
       <main className="flex flex-1 overflow-hidden relative">
         {/* Sidebar Overlay */}
-        {isSidebarOpen && (
+        {isSidebarOpen && !isPinned && (
           <div 
             className="absolute inset-0 bg-black/40 z-[1500] backdrop-blur-[2px] transition-all duration-300" 
             onClick={() => setIsSidebarOpen(false)}
@@ -361,12 +482,29 @@ export default function App() {
         
         {/* Sidebar Controls */}
         <aside className={cn(
-          "absolute z-[1600] h-full w-72 md:w-80 border-r overflow-y-auto p-6 flex flex-col gap-6 shrink-0 transition-transform duration-300 ease-in-out shadow-2xl",
+          "h-full border-r overflow-y-auto flex flex-col gap-6 shrink-0 transition-all duration-300 ease-in-out",
+          isPinned ? "relative z-20" : "absolute z-[1600] shadow-2xl",
           isDarkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200",
-          isSidebarOpen ? "translate-x-0" : "-translate-x-full"
+          isSidebarOpen 
+            ? "w-72 md:w-80 p-6 translate-x-0 opacity-100" 
+            : "w-0 p-0 border-none -translate-x-full opacity-0 overflow-hidden"
         )}>
           <div className="flex justify-between items-center mb-2">
-            <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Controls</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Controls</span>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className={cn(
+                  "w-6 h-6 rounded-md transition-colors",
+                  isPinned ? "text-red-500 bg-red-500/10" : "text-slate-400 hover:text-slate-600"
+                )}
+                onClick={() => setIsPinned(!isPinned)}
+                title={isPinned ? "Unpin Sidebar" : "Pin Sidebar"}
+              >
+                <Pin className={cn("w-3.5 h-3.5", isPinned && "fill-current")} />
+              </Button>
+            </div>
             <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(false)}>
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -560,6 +698,18 @@ export default function App() {
               </div>
             </div>
           </section>
+
+          <section className="mt-auto pt-6 border-t border-slate-100 dark:border-slate-800">
+            <Button
+              variant="outline"
+              className="w-full flex items-center gap-2 justify-center py-6"
+              onClick={exportToHtml}
+              disabled={data.length === 0}
+            >
+              <Download className="w-4 h-4" />
+              <span>Export to HTML</span>
+            </Button>
+          </section>
         </aside>
 
         {/* Map Area */}
@@ -632,6 +782,7 @@ export default function App() {
                 highTempPoints={highTempPoints}
                 focusPoints={focusedEventIndex !== null ? heatEvents[focusedEventIndex]?.points : undefined}
                 isDarkMode={isDarkMode}
+                resizeTrigger={`${isSidebarOpen}-${isPinned}`}
               />
               <Legend isDarkMode={isDarkMode} />
               

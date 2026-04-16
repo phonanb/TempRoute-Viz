@@ -32,6 +32,7 @@ interface MapDisplayProps {
   highTempPoints: GPSData[];
   focusPoints?: GPSData[];
   isDarkMode: boolean;
+  resizeTrigger?: any;
 }
 
 const MapAutoCenter: React.FC<{ center: [number, number]; enabled: boolean }> = ({ center, enabled }) => {
@@ -41,6 +42,16 @@ const MapAutoCenter: React.FC<{ center: [number, number]; enabled: boolean }> = 
       map.setView(center);
     }
   }, [center, map, enabled]);
+  return null;
+};
+
+const MapResize: React.FC<{ trigger: any }> = ({ trigger }) => {
+  const map = useMap();
+  useEffect(() => {
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 300);
+  }, [map, trigger]);
   return null;
 };
 
@@ -64,7 +75,8 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({
   showHighTempLayer,
   highTempPoints,
   focusPoints,
-  isDarkMode 
+  isDarkMode,
+  resizeTrigger
 }) => {
   const currentPoint = data[currentIndex];
   
@@ -230,6 +242,7 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({
 
         <MapAutoCenter center={center} enabled={followMarker} />
         <MapFocus points={focusPoints} />
+        <MapResize trigger={resizeTrigger} />
       </MapContainer>
     </div>
   );
