@@ -267,18 +267,27 @@ export default function App() {
           const decompressed = LZString.decompressFromEncodedURIComponent(encodedData);
           if (decompressed) {
             const parsed = JSON.parse(decompressed);
-            // Convert string dates back to Date objects
-            const restored = parsed.map((p: any) => ({
-              ...p,
-              time: new Date(p.time)
-            }));
+            // Convert string dates back to Date objects and handle shortened keys
+            const restored = parsed.map((p: any) => {
+              // Handle shortened keys (a: lat, o: long, t: temp, m: time, l: location)
+              const lat = p.a !== undefined ? p.a : p.lat;
+              const long = p.o !== undefined ? p.o : p.long;
+              const temp = p.t !== undefined ? p.t : p.temp;
+              const time = p.m !== undefined ? new Date(p.m) : new Date(p.time);
+              const location = p.l !== undefined ? p.l : p.location;
+
+              return {
+                lat,
+                long,
+                temp,
+                time,
+                location
+              };
+            });
             setData(restored);
             if (encodedName) setFileName(decodeURIComponent(encodedName));
             setCurrentIndex(0);
             setIsPlaying(true);
-            
-            // Clean up URL to keep it tidy (optional)
-            // window.history.replaceState(null, '', window.location.pathname);
           }
         } catch (err) {
           console.error("Failed to load shared data", err);
@@ -298,29 +307,27 @@ export default function App() {
     
     setIsSharing(true);
     try {
-      // Create a smaller version of data for sharing
+      // Create a much smaller version of data for sharing using short keys and reduced precision
+      // a: lat, o: long, t: temp, m: time (timestamp), l: location
       const minimalData = data.map(p => ({
-        lat: p.lat,
-        long: p.long,
-        temp: p.temp,
-        time: p.time,
-        location: p.location
+        a: Number(p.lat.toFixed(6)),
+        o: Number(p.long.toFixed(6)),
+        t: Number(p.temp.toFixed(1)),
+        m: p.time.getTime(),
+        l: p.location
       }));
 
       const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(minimalData));
       
-      // Use Hash (#) instead of Query (?) to support much larger data (up to several MB in modern browsers)
-      // and avoid server-side URL length limits.
       const url = new URL(window.location.origin + window.location.pathname);
       const hashParams = new URLSearchParams();
       hashParams.set('d', compressed);
-      if (fileName) hashParams.set('n', encodeURIComponent(fileName));
+      if (fileName) hashParams.set('n', fileName); // No need to double encode
       
       url.hash = hashParams.toString();
       const finalUrl = url.toString();
       
-      // Modern browsers handle very large hashes, but we'll still warn if it's extreme
-      if (finalUrl.length > 1000000) { // 1MB limit for safety
+      if (finalUrl.length > 1000000) {
         setError("Data is extremely large. The link might not work in all browsers.");
       }
       
@@ -412,6 +419,16 @@ export default function App() {
             )}>GPS Analysis</p>
           </div>
         </div>
+
+        {/* File Name Display - Center */}
+        {fileName && (
+          <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-2 px-4 py-1.5 rounded-full border bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in duration-300">
+            <FileText className="w-3.5 h-3.5 text-slate-400" />
+            <span className="text-xs font-bold truncate max-w-[150px] lg:max-w-[300px]">
+              {fileName}
+            </span>
+          </div>
+        )}
 
         <div className="flex items-center gap-2 md:gap-4">
           {data.length > 0 && (
@@ -698,18 +715,6 @@ export default function App() {
               </div>
             </div>
           </section>
-
-          <section className="mt-auto pt-6 border-t border-slate-100 dark:border-slate-800">
-            <Button
-              variant="outline"
-              className="w-full flex items-center gap-2 justify-center py-6"
-              onClick={exportToHtml}
-              disabled={data.length === 0}
-            >
-              <Download className="w-4 h-4" />
-              <span>Export to HTML</span>
-            </Button>
-          </section>
         </aside>
 
         {/* Map Area */}
@@ -752,10 +757,16 @@ export default function App() {
                 </div>
 
                 <div className="flex items-center gap-1.5 md:gap-2">
-                  <Thermometer className="w-3 h-3 md:w-3.5 md:h-3.5 text-red-500" />
+                  <Thermometer className={cn(
+                    "w-3 h-3 md:w-3.5 md:h-3.5 transition-colors duration-300",
+                    currentPoint.temp > 30 ? "text-red-500" : "text-slate-400"
+                  )} />
                   <div className="flex flex-col">
                     <span className="hidden md:block text-[8px] uppercase font-bold text-slate-500 leading-none mb-0.5">Temp</span>
-                    <span className="text-[10px] md:text-xs font-bold text-red-500 leading-none">
+                    <span className={cn(
+                      "text-[10px] md:text-xs font-bold leading-none transition-colors duration-300",
+                      currentPoint.temp > 30 ? "text-red-500" : (isDarkMode ? "text-slate-100" : "text-slate-900")
+                    )}>
                       {currentPoint.temp.toFixed(1)}°C
                     </span>
                   </div>
@@ -795,7 +806,10 @@ export default function App() {
                   <div className="flex justify-between items-center px-1 md:px-2">
                     <div className="flex flex-col">
                       <span className="text-[8px] md:text-[10px] uppercase tracking-widest font-bold text-slate-400">Current Time</span>
-                      <div key={`time-${currentIndex}`} className="flex items-baseline gap-1 md:gap-2 text-red-500">
+                      <div key={`time-${currentIndex}`} className={cn(
+                        "flex items-baseline gap-1 md:gap-2 transition-colors duration-300",
+                        currentPoint && currentPoint.temp > 30 ? "text-red-500" : (isDarkMode ? "text-slate-300" : "text-slate-600")
+                      )}>
                         <span className="text-[10px] md:text-xs font-bold">
                           {currentPoint ? formatInTimeZone(currentPoint.time, TIMEZONE, 'dd/MM') : '--/--'}
                         </span>
