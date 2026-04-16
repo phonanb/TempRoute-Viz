@@ -19,6 +19,9 @@ import {
   Map as MapIcon, 
   Clock, 
   ChevronRight,
+  ChevronLeft,
+  SkipBack,
+  SkipForward,
   Info,
   Sun,
   Moon,
@@ -190,11 +193,13 @@ export default function App() {
       maxTemp: number;
       avgTemp: number;
       locations: string[];
+      startIndex: number;
     }[] = [];
     
     let currentSequence: GPSData[] = [];
+    let currentStartIndex = -1;
     
-    const processSequence = (seq: GPSData[]) => {
+    const processSequence = (seq: GPSData[], startIndex: number) => {
       if (seq.length > 1) {
         const start = seq[0].time.getTime();
         const end = seq[seq.length - 1].time.getTime();
@@ -211,7 +216,8 @@ export default function App() {
             minTemp: Math.min(...temps),
             maxTemp: Math.max(...temps),
             avgTemp: temps.reduce((a, b) => a + b, 0) / temps.length,
-            locations
+            locations,
+            startIndex
           });
         }
       }
@@ -220,16 +226,45 @@ export default function App() {
     for (let i = 0; i < data.length; i++) {
       const p = data[i];
       if (p.temp > 30) {
+        if (currentSequence.length === 0) currentStartIndex = i;
         currentSequence.push(p);
       } else {
-        processSequence(currentSequence);
+        processSequence(currentSequence, currentStartIndex);
         currentSequence = [];
+        currentStartIndex = -1;
       }
     }
-    processSequence(currentSequence);
+    processSequence(currentSequence, currentStartIndex);
     
     return events;
   }, [data]);
+
+  const goToNextHeatEvent = () => {
+    const nextEvent = heatEvents.find(e => e.startIndex > currentIndex);
+    if (nextEvent) {
+      setCurrentIndex(nextEvent.startIndex);
+      setIsPlaying(false);
+    }
+  };
+
+  const goToPrevHeatEvent = () => {
+    const prevEvents = heatEvents.filter(e => e.startIndex < currentIndex);
+    if (prevEvents.length > 0) {
+      const prevEvent = prevEvents[prevEvents.length - 1];
+      setCurrentIndex(prevEvent.startIndex);
+      setIsPlaying(false);
+    }
+  };
+
+  const stepForward = () => {
+    setCurrentIndex(prev => Math.min(prev + 1, data.length - 1));
+    setIsPlaying(false);
+  };
+
+  const stepBackward = () => {
+    setCurrentIndex(prev => Math.max(prev - 1, 0));
+    setIsPlaying(false);
+  };
 
   const highTempPoints = useMemo(() => {
     return heatEvents.flatMap(e => e.points);
@@ -827,30 +862,89 @@ export default function App() {
                   </div>
 
                   <div className="flex items-center gap-3 md:gap-4">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 md:gap-2">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={goToPrevHeatEvent}
+                        disabled={data.length === 0 || heatEvents.filter(e => e.startIndex < currentIndex).length === 0}
+                        className={cn(
+                          "rounded-full w-7 h-7 md:w-10 md:h-10 shrink-0",
+                          isDarkMode ? "border-slate-700 hover:bg-slate-800" : "border-slate-200"
+                        )}
+                        title="Back Heat Event"
+                      >
+                        <SkipBack className="w-3 h-3 md:w-4 md:h-4" />
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={stepBackward}
+                        disabled={data.length === 0 || currentIndex === 0}
+                        className={cn(
+                          "rounded-full w-7 h-7 md:w-10 md:h-10 shrink-0",
+                          isDarkMode ? "border-slate-700 hover:bg-slate-800" : "border-slate-200"
+                        )}
+                        title="Step Backward"
+                      >
+                        <ChevronLeft className="w-3 h-3 md:w-4 md:h-4" />
+                      </Button>
+
                       <Button
                         variant="outline"
                         size="icon"
                         onClick={() => setCurrentIndex(0)}
                         disabled={data.length === 0}
                         className={cn(
-                          "rounded-full w-8 h-8 md:w-10 md:h-10 shrink-0",
+                          "rounded-full w-7 h-7 md:w-10 md:h-10 shrink-0",
                           isDarkMode ? "border-slate-700 hover:bg-slate-800" : "border-slate-200"
                         )}
+                        title="Reset"
                       >
                         <RotateCcw className="w-3 h-3 md:w-4 md:h-4" />
                       </Button>
+
                       <Button
                         size="icon"
                         variant={isPlaying ? "outline" : "default"}
                         className={cn(
-                          "w-8 h-8 md:w-10 md:h-10 rounded-full shadow-md transition-all shrink-0",
+                          "w-8 h-8 md:w-12 md:h-12 rounded-full shadow-md transition-all shrink-0 scale-110 md:scale-100",
                           !isPlaying ? 'bg-red-500 hover:bg-red-600 text-white' : (isDarkMode ? 'border-slate-700 hover:bg-slate-800' : 'border-slate-200')
                         )}
                         onClick={() => setIsPlaying(!isPlaying)}
                         disabled={data.length === 0}
+                        title={isPlaying ? "Pause" : "Play"}
                       >
-                        {isPlaying ? <Pause className="w-3 h-3 md:w-4 md:h-4" /> : <Play className="w-3 h-3 md:w-4 md:h-4 fill-current" />}
+                        {isPlaying ? <Pause className="w-3 h-3 md:w-5 md:h-5" /> : <Play className="w-3 h-3 md:w-5 md:h-5 fill-current" />}
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={stepForward}
+                        disabled={data.length === 0 || currentIndex === data.length - 1}
+                        className={cn(
+                          "rounded-full w-7 h-7 md:w-10 md:h-10 shrink-0",
+                          isDarkMode ? "border-slate-700 hover:bg-slate-800" : "border-slate-200"
+                        )}
+                        title="Step Forward"
+                      >
+                        <ChevronRight className="w-3 h-3 md:w-4 md:h-4" />
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={goToNextHeatEvent}
+                        disabled={data.length === 0 || !heatEvents.find(e => e.startIndex > currentIndex)}
+                        className={cn(
+                          "rounded-full w-7 h-7 md:w-10 md:h-10 shrink-0",
+                          isDarkMode ? "border-slate-700 hover:bg-slate-800" : "border-slate-200"
+                        )}
+                        title="Next Heat Event"
+                      >
+                        <SkipForward className="w-3 h-3 md:w-4 md:h-4" />
                       </Button>
                     </div>
                     <Slider
