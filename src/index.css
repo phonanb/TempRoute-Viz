@@ -198,3 +198,19 @@
 .leaflet-tooltip-top:before {
   display: none !important;
 }
+
+.custom-marker-popup .leaflet-popup-content-wrapper {
+  padding: 0 !important;
+  overflow: hidden;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.custom-marker-popup .leaflet-popup-content {
+  margin: 0 !important;
+  width: auto !important;
+}
+
+.custom-marker-popup .leaflet-popup-tip-container {
+  display: none !important;
+}

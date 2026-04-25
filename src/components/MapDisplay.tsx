@@ -213,20 +213,44 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({
                     {currentPoint.temp.toFixed(1)}°C
                   </div>
                 </Tooltip>
-                <Popup>
-                  <div className="text-sm space-y-1">
-                    <p className="font-bold border-b pb-1 mb-1" style={{ color: d.color }}>
-                      {d.name}
-                    </p>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-                      <span className="text-slate-500 dark:text-slate-400">Date:</span>
-                      <span className="font-medium dark:text-slate-200">{formatInTimeZone(currentPoint.time, TIMEZONE, 'dd/MM/yyyy')}</span>
-                      <span className="text-slate-500 dark:text-slate-400">Time:</span>
-                      <span className="font-medium dark:text-slate-200">{formatInTimeZone(currentPoint.time, TIMEZONE, 'HH:mm:ss')}</span>
-                      <span className="text-slate-500 dark:text-slate-400">Temp:</span>
-                      <span className="font-medium text-red-500">{currentPoint.temp.toFixed(1)}°C</span>
-                      <span className="text-slate-500 dark:text-slate-400">Location:</span>
-                      <span className="font-medium dark:text-slate-200 truncate max-w-[100px]">{currentPoint.location || 'N/A'}</span>
+                <Popup className="custom-marker-popup">
+                  <div className={cn(
+                    "min-w-[220px] overflow-hidden rounded-lg shadow-xl border",
+                    isDarkMode ? "bg-slate-900 border-slate-700 text-slate-100" : "bg-white border-slate-200 text-slate-900"
+                  )}>
+                    <div className="px-3 py-2 text-white font-bold text-xs flex justify-between items-center" style={{ backgroundColor: d.color }}>
+                      <span>{d.name}</span>
+                      {currentPoint.temp > 30 && <span className="bg-white/20 px-1.5 py-0.5 rounded text-[8px] animate-pulse">HIGH TEMP</span>}
+                    </div>
+                    <div className="p-3 space-y-2 text-[11px]">
+                      <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-1.5">
+                        <span className="text-slate-500 font-medium">Date:</span>
+                        <span className="font-mono font-bold tracking-tight">{formatInTimeZone(currentPoint.time, TIMEZONE, 'dd/MM/yyyy')}</span>
+                      </div>
+                      <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-1.5">
+                        <span className="text-slate-500 font-medium">Time:</span>
+                        <span className="font-mono font-bold tracking-tight">{formatInTimeZone(currentPoint.time, TIMEZONE, 'HH:mm:ss')}</span>
+                      </div>
+                      <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-1.5">
+                        <span className="text-slate-500 font-medium">Temp:</span>
+                        <span className={cn(
+                          "font-bold font-mono text-[13px] px-1.5 py-0.5 rounded",
+                          currentPoint.temp > 30 
+                            ? "text-red-600 bg-red-50 dark:bg-red-900/40" 
+                            : (isDarkMode ? "text-blue-400 bg-blue-900/30" : "text-blue-600 bg-blue-50")
+                        )}>
+                          {currentPoint.temp.toFixed(1)}°C
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 font-medium block mb-1">Location:</span>
+                        <div className={cn(
+                          "p-2 rounded leading-relaxed text-[10px] break-words",
+                          isDarkMode ? "bg-slate-800/50" : "bg-slate-50"
+                        )}>
+                          {currentPoint.location || 'Unknown Location'}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </Popup>

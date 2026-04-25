@@ -1066,15 +1066,15 @@ export default function App() {
                   <div className="flex flex-col">
                     <span className="text-[10px] uppercase font-bold text-blue-500 mb-0.5 tracking-wider">Playback Time</span>
                     <div className="flex items-center gap-2">
-                      <Clock className="w-4 h-4 text-slate-400" />
-                      <span className="text-xl font-mono font-bold tracking-tight bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded text-blue-600 dark:text-blue-400">
+                      <Clock className="w-5 h-5 text-slate-400" />
+                      <span className="text-3xl font-mono font-bold tracking-tight bg-blue-50 dark:bg-blue-900/30 px-3 py-1 rounded text-blue-600 dark:text-blue-400">
                         {formatInTimeZone(new Date(currentPlayTime), TIMEZONE, 'HH:mm:ss')}
                       </span>
                     </div>
                   </div>
                   <div className="flex flex-col items-end">
                     <span className="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider">Date</span>
-                    <Badge variant="secondary" className="text-[10px] bg-slate-100 dark:bg-slate-800 h-6 font-bold">
+                    <Badge variant="secondary" className="text-[10px] bg-slate-100 dark:bg-slate-800 h-6 font-bold px-3">
                       {formatInTimeZone(new Date(currentPlayTime), TIMEZONE, 'dd/MM/yyyy')}
                     </Badge>
                   </div>
