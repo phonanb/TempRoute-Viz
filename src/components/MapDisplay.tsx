@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { MapContainer, TileLayer, Polyline, CircleMarker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, CircleMarker, Popup, useMap, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import { GPSData, Dataset } from '../types';
 import { getTempColor } from '../lib/data-processor';
@@ -169,9 +169,9 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({
                           [p.lat, p.long]
                         ]}
                         pathOptions={{
-                          color: d.color,
+                          color: getTempColor(p.temp),
                           weight: activeDatasetId === d.id ? 5 : 3,
-                          opacity: activeDatasetId === d.id ? 0.7 : 0.4,
+                          opacity: activeDatasetId === d.id ? 0.9 : 0.6,
                           lineCap: 'round'
                         }}
                       />
@@ -197,6 +197,22 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({
                   fillOpacity: 1
                 }}
               >
+                <Tooltip 
+                  permanent 
+                  direction="top" 
+                  offset={[0, -12]} 
+                  opacity={1}
+                  className="bg-transparent border-none shadow-none p-0 tooltip-custom"
+                >
+                  <div className={cn(
+                    "px-1.5 py-0.5 rounded text-[10px] font-bold shadow-md border whitespace-nowrap",
+                    currentPoint.temp > 30 
+                      ? "bg-red-500 text-white border-red-600" 
+                      : (isDarkMode ? "bg-slate-800 text-slate-100 border-slate-700" : "bg-white text-slate-900 border-slate-200")
+                  )}>
+                    {currentPoint.temp.toFixed(1)}°C
+                  </div>
+                </Tooltip>
                 <Popup>
                   <div className="text-sm space-y-1">
                     <p className="font-bold border-b pb-1 mb-1" style={{ color: d.color }}>

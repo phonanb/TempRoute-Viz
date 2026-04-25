@@ -18,6 +18,7 @@ import {
   Thermometer, 
   Map as MapIcon, 
   Clock, 
+  Zap,
   ChevronRight,
   ChevronLeft,
   SkipBack,
@@ -47,7 +48,7 @@ export default function App() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [currentPlayTime, setCurrentPlayTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [speed, setSpeed] = useState(100); 
+  const [playbackSpeed, setPlaybackSpeed] = useState(1); 
   const [trailHours, setTrailHours] = useState(7);
   const [isPermanentTrail, setIsPermanentTrail] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -293,37 +294,6 @@ export default function App() {
     
     return allEvents;
   }, [datasets]);
-
-  const goToNextHeatEvent = () => {
-    if (!activeDataset) return;
-    const events = heatEvents[activeDataset.id] || [];
-    const nextEvent = events.find(e => e.startTime.getTime() > currentPlayTime);
-    if (nextEvent) {
-      setCurrentPlayTime(nextEvent.startTime.getTime());
-      setIsPlaying(false);
-    }
-  };
-
-  const goToPrevHeatEvent = () => {
-    if (!activeDataset) return;
-    const events = heatEvents[activeDataset.id] || [];
-    const prevEvents = events.filter(e => e.startTime.getTime() < currentPlayTime - 1000);
-    if (prevEvents.length > 0) {
-      const prevEvent = prevEvents[prevEvents.length - 1];
-      setCurrentPlayTime(prevEvent.startTime.getTime());
-      setIsPlaying(false);
-    }
-  };
-
-  const stepForward = () => {
-    setCurrentPlayTime(prev => Math.min(prev + 10000, timeRange.max));
-    setIsPlaying(false);
-  };
-
-  const stepBackward = () => {
-    setCurrentPlayTime(prev => Math.max(prev - 10000, timeRange.min));
-    setIsPlaying(false);
-  };
 
   const highTempPoints = useMemo(() => {
     const points: Record<string, GPSData[]> = {};
@@ -585,6 +555,52 @@ export default function App() {
     setIsPlaying(false);
   };
 
+  const stepForward = () => {
+    setCurrentPlayTime(prev => Math.min(prev + (5000 * playbackSpeed), timeRange.max));
+  };
+
+  const stepBackward = () => {
+    setCurrentPlayTime(prev => Math.max(prev - (5000 * playbackSpeed), timeRange.min));
+  };
+
+  const goToNextGlobalHeatEvent = () => {
+    let earliestNextEvent: number | null = null;
+    Object.keys(heatEvents).forEach(datasetId => {
+      const events = heatEvents[datasetId] || [];
+      const nextEvent = events.find(e => e.startTime.getTime() > currentPlayTime + 1000);
+      if (nextEvent) {
+        const eventTime = nextEvent.startTime.getTime();
+        if (earliestNextEvent === null || eventTime < earliestNextEvent) {
+          earliestNextEvent = eventTime;
+        }
+      }
+    });
+
+    if (earliestNextEvent !== null) {
+      setCurrentPlayTime(earliestNextEvent);
+      setIsPlaying(false);
+    }
+  };
+
+  const goToPrevGlobalHeatEvent = () => {
+    let latestPrevEvent: number | null = null;
+    Object.keys(heatEvents).forEach(datasetId => {
+      const events = heatEvents[datasetId] || [];
+      const prevEvents = events.filter(e => e.startTime.getTime() < currentPlayTime - 5000);
+      if (prevEvents.length > 0) {
+        const eventTime = prevEvents[prevEvents.length - 1].startTime.getTime();
+        if (latestPrevEvent === null || eventTime > latestPrevEvent) {
+          latestPrevEvent = eventTime;
+        }
+      }
+    });
+
+    if (latestPrevEvent !== null) {
+      setCurrentPlayTime(latestPrevEvent);
+      setIsPlaying(false);
+    }
+  };
+
   const removeDataset = (id: string) => {
     setDatasets(prev => {
       const filtered = prev.filter(d => d.id !== id);
@@ -609,9 +625,9 @@ export default function App() {
             setIsPlaying(false);
             return prev;
           }
-          return prev + 1000; // Increment by 1 second for simulation
+          return prev + (1000 * playbackSpeed); 
         });
-      }, speed);
+      }, 100);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
     }
@@ -619,7 +635,7 @@ export default function App() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isPlaying, datasets.length, speed, isDragging, timeRange.max]);
+  }, [isPlaying, datasets.length, playbackSpeed, isDragging, timeRange.max]);
 
   const activePoint = activeDatasetId ? currentPoints[activeDatasetId] : null;
 
@@ -814,20 +830,29 @@ export default function App() {
             <div className="space-y-6">
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
-                  <Label className="text-sm font-medium">Speed</Label>
-                  <span className="text-xs font-mono text-slate-500">{speed || 100}ms</span>
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-3.5 h-3.5 text-blue-500" />
+                    <Label className="text-sm font-medium">Playback Speed</Label>
+                  </div>
+                  <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded">
+                    {playbackSpeed}x
+                  </span>
                 </div>
                 <Slider
-                  value={[speed || 100]}
-                  min={10}
-                  max={1000}
-                  step={10}
+                  value={[playbackSpeed]}
+                  min={1}
+                  max={600}
+                  step={1}
                   onValueChange={(val) => {
                     const v = Array.isArray(val) ? val[0] : val;
-                    if (typeof v === 'number') setSpeed(v);
+                    if (typeof v === 'number') setPlaybackSpeed(v);
                   }}
                   disabled={datasets.length === 0}
                 />
+                <div className="flex justify-between text-[10px] text-slate-400 font-bold uppercase">
+                  <span>1x (Real Time)</span>
+                  <span>600x</span>
+                </div>
               </div>
 
               <div className="space-y-3">
@@ -1018,43 +1043,62 @@ export default function App() {
             <>
               {/* Current Status Bar (Summary of all vehicles) */}
               <div className={cn(
-                "absolute top-4 left-4 z-[1000] backdrop-blur-md rounded-2xl border shadow-xl flex flex-col p-4 gap-3 transition-all duration-300 max-w-[280px] w-full",
-                isDarkMode ? "bg-slate-900/90 border-slate-800" : "bg-white/90 border-blue-100"
+                "absolute top-4 left-16 z-[1000] backdrop-blur-md rounded-2xl border shadow-2xl flex flex-col p-4 gap-3 transition-all duration-300 max-w-[300px] w-full",
+                isDarkMode ? "bg-slate-900/95 border-slate-800 shadow-slate-950/50" : "bg-white/95 border-blue-100 shadow-blue-900/10"
               )}>
-                <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-2 mb-1">
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-slate-400" />
-                    <span className="text-xs font-mono font-bold tracking-tight">
-                      {formatInTimeZone(new Date(currentPlayTime), TIMEZONE, 'HH:mm:ss')}
-                    </span>
+                <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-3 mb-1">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] uppercase font-bold text-blue-500 mb-0.5 tracking-wider">Playback Time</span>
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-slate-400" />
+                      <span className="text-xl font-mono font-bold tracking-tight bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded text-blue-600 dark:text-blue-400">
+                        {formatInTimeZone(new Date(currentPlayTime), TIMEZONE, 'HH:mm:ss')}
+                      </span>
+                    </div>
                   </div>
-                  <Badge variant="outline" className="text-[9px] bg-slate-50 dark:bg-slate-800 h-5">
-                    {formatInTimeZone(new Date(currentPlayTime), TIMEZONE, 'dd/MM/yyyy')}
-                  </Badge>
+                  <div className="flex flex-col items-end">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider">Date</span>
+                    <Badge variant="secondary" className="text-[10px] bg-slate-100 dark:bg-slate-800 h-6 font-bold">
+                      {formatInTimeZone(new Date(currentPlayTime), TIMEZONE, 'dd/MM/yyyy')}
+                    </Badge>
+                  </div>
                 </div>
                 
                 <div className="space-y-2.5 max-h-[200px] overflow-y-auto pr-1 custom-scrollbar">
                   {datasets.filter(d => d.visible).map(d => {
                     const point = currentPoints[d.id];
+                    if (!point) return null;
+                    const isHighTemp = point.temp > 30;
+                    const isActive = d.id === activeDatasetId;
+                    
                     return (
-                      <div key={d.id} className="flex items-center justify-between group">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
+                      <div 
+                        key={`status-${d.id}`} 
+                        className={cn(
+                          "flex items-center justify-between transition-all",
+                          isActive ? "scale-105" : "opacity-80"
+                        )}
+                      >
+                        <div className="flex items-center gap-2 truncate pr-2">
+                          <div 
+                            className="w-1.5 h-1.5 rounded-full shrink-0" 
+                            style={{ backgroundColor: d.color }}
+                          />
                           <span className={cn(
-                            "text-[10px] font-bold truncate",
-                            activeDatasetId === d.id ? (isDarkMode ? "text-slate-100" : "text-slate-900") : "text-slate-500"
+                            "text-[11px] truncate leading-tight",
+                            isActive ? "font-bold text-slate-900 dark:text-white" : "font-medium text-slate-500"
                           )}>
                             {d.name}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className={cn(
-                            "text-[10px] font-mono font-bold",
-                            point && point.temp > 30 ? "text-red-500" : "text-slate-600 dark:text-slate-400"
-                          )}>
-                            {point ? `${point.temp.toFixed(1)}°C` : '--°C'}
-                          </span>
-                        </div>
+                        <span className={cn(
+                          "text-[10px] font-bold font-mono px-1.5 py-0.5 rounded",
+                          isHighTemp 
+                            ? "text-red-500 bg-red-50 dark:bg-red-950/30" 
+                            : (isActive ? "text-slate-900 dark:text-slate-100" : "text-slate-500")
+                        )}>
+                          {point.temp.toFixed(1)}°C
+                        </span>
                       </div>
                     );
                   })}
@@ -1109,13 +1153,13 @@ export default function App() {
                       <Button
                         variant="outline"
                         size="icon"
-                        onClick={goToPrevHeatEvent}
+                        onClick={goToPrevGlobalHeatEvent}
                         disabled={datasets.length === 0}
                         className={cn(
                           "rounded-full w-7 h-7 md:w-10 md:h-10 shrink-0",
                           isDarkMode ? "border-slate-700 hover:bg-slate-800" : "border-slate-200"
                         )}
-                        title="Prev Heat Event (Active Vehicle)"
+                        title="Prev Global Heat Event"
                       >
                         <SkipBack className="w-3 h-3 md:w-4 md:h-4" />
                       </Button>
@@ -1179,13 +1223,13 @@ export default function App() {
                       <Button
                         variant="outline"
                         size="icon"
-                        onClick={goToNextHeatEvent}
+                        onClick={goToNextGlobalHeatEvent}
                         disabled={datasets.length === 0}
                         className={cn(
                           "rounded-full w-7 h-7 md:w-10 md:h-10 shrink-0",
                           isDarkMode ? "border-slate-700 hover:bg-slate-800" : "border-slate-200"
                         )}
-                        title="Next Heat Event (Active Vehicle)"
+                        title="Next Global Heat Event"
                       >
                         <SkipForward className="w-3 h-3 md:w-4 md:h-4" />
                       </Button>

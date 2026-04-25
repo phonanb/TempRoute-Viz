@@ -187,3 +187,14 @@
     @apply font-sans;
     }
 }
+
+.tooltip-custom {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.leaflet-tooltip-top:before {
+  display: none !important;
+}
