@@ -302,23 +302,62 @@ export default function App() {
           const decompressed = LZString.decompressFromEncodedURIComponent(encodedData);
           if (decompressed) {
             const parsed = JSON.parse(decompressed);
-            // Convert string dates back to Date objects and handle shortened keys
-            const restored = parsed.map((p: any) => {
-              // Handle shortened keys (a: lat, o: long, t: temp, m: time, l: location)
-              const lat = p.a !== undefined ? p.a : p.lat;
-              const long = p.o !== undefined ? p.o : p.long;
-              const temp = p.t !== undefined ? p.t : p.temp;
-              const time = p.m !== undefined ? new Date(p.m) : new Date(p.time);
-              const location = p.l !== undefined ? p.l : p.location;
+            let restored = [];
 
-              return {
-                lat,
-                long,
-                temp,
-                time,
-                location
-              };
-            });
+            // Handle Version 2 format (Delta-encoded array)
+            if (parsed.v === 2 && Array.isArray(parsed.d)) {
+              const locations = parsed.ls || [];
+              const [bLat, bLong, bTime, bTemp] = parsed.b;
+              
+              let lastLat = bLat;
+              let lastLong = bLong;
+              let lastTime = bTime;
+              let lastTemp = bTemp;
+
+              restored = parsed.d.map((delta: any) => {
+                const [dLat, dLong, dTime, dTemp, locIdx] = delta;
+                lastLat += dLat;
+                lastLong += dLong;
+                lastTime += dTime;
+                lastTemp += dTemp;
+
+                return {
+                  lat: lastLat / 1e6,
+                  long: lastLong / 1e6,
+                  time: new Date(lastTime),
+                  temp: lastTemp / 10,
+                  location: locations[locIdx] || ""
+                };
+              });
+              
+              // Add the base point at the beginning
+              restored.unshift({
+                lat: bLat / 1e6,
+                long: bLong / 1e6,
+                time: new Date(bTime),
+                temp: bTemp / 10,
+                location: locations[parsed.bli] || ""
+              });
+            } else {
+              // Handle Version 1 and Legacy formats
+              restored = parsed.map((p: any) => {
+                // Handle shortened keys (a: lat, o: long, t: temp, m: time, l: location)
+                const lat = p.a !== undefined ? p.a : p.lat;
+                const long = p.o !== undefined ? p.o : p.long;
+                const temp = p.t !== undefined ? p.t : p.temp;
+                const time = p.m !== undefined ? new Date(p.m) : new Date(p.time);
+                const location = p.l !== undefined ? p.l : p.location;
+
+                return {
+                  lat,
+                  long,
+                  temp,
+                  time,
+                  location
+                };
+              });
+            }
+
             setData(restored);
             if (encodedName) setFileName(decodeURIComponent(encodedName));
             setCurrentIndex(0);
@@ -342,28 +381,74 @@ export default function App() {
     
     setIsSharing(true);
     try {
-      // Create a much smaller version of data for sharing using short keys and reduced precision
-      // a: lat, o: long, t: temp, m: time (timestamp), l: location
-      const minimalData = data.map(p => ({
-        a: Number(p.lat.toFixed(6)),
-        o: Number(p.long.toFixed(6)),
-        t: Number(p.temp.toFixed(1)),
-        m: p.time.getTime(),
-        l: p.location
-      }));
+      // ADVANCED COMPRESSION: Version 2
+      // Goal: Keep all points while staying under 5000 characters.
+      // Strategy: Delta encoding + Location mapping + Integer scaling.
+      
+      const locations: string[] = [];
+      const getLocIdx = (loc: string) => {
+        let idx = locations.indexOf(loc);
+        if (idx === -1) {
+          idx = locations.length;
+          locations.push(loc);
+        }
+        return idx;
+      };
 
-      const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(minimalData));
+      // Base point values (integers for better compression)
+      const bLat = Math.round(data[0].lat * 1e6);
+      const bLong = Math.round(data[0].long * 1e6);
+      const bTime = data[0].time.getTime();
+      const bTemp = Math.round(data[0].temp * 10);
+      const bLocIdx = getLocIdx(data[0].location || "");
+
+      let lastLat = bLat;
+      let lastLong = bLong;
+      let lastTime = bTime;
+      let lastTemp = bTemp;
+
+      const deltas = [];
+      for (let i = 1; i < data.length; i++) {
+        const curLat = Math.round(data[i].lat * 1e6);
+        const curLong = Math.round(data[i].long * 1e6);
+        const curTime = data[i].time.getTime();
+        const curTemp = Math.round(data[i].temp * 10);
+        const curLocIdx = getLocIdx(data[i].location || "");
+
+        deltas.push([
+          curLat - lastLat,
+          curLong - lastLong,
+          curTime - lastTime,
+          curTemp - lastTemp,
+          curLocIdx
+        ]);
+
+        lastLat = curLat;
+        lastLong = curLong;
+        lastTime = curTime;
+        lastTemp = curTemp;
+      }
+
+      const compactData = {
+        v: 2, // Version
+        ls: locations, // Location set
+        b: [bLat, bLong, bTime, bTemp], // Base point
+        bli: bLocIdx, // Base location index
+        d: deltas // Deltas
+      };
+
+      const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(compactData));
       
       const url = new URL(window.location.origin + window.location.pathname);
       const hashParams = new URLSearchParams();
       hashParams.set('d', compressed);
-      if (fileName) hashParams.set('n', fileName); // No need to double encode
+      if (fileName) hashParams.set('n', fileName);
       
       url.hash = hashParams.toString();
       const finalUrl = url.toString();
       
-      if (finalUrl.length > 1000000) {
-        setError("Data is extremely large. The link might not work in all browsers.");
+      if (finalUrl.length > 10000) {
+        setError(`The link is ${finalUrl.length} characters long. Some browsers may have issues.`);
       }
       
       navigator.clipboard.writeText(finalUrl);
