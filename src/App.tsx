@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { MapDisplay } from './components/MapDisplay';
 import { Legend } from './components/Legend';
 import { parseFile, cleanGPSData } from './lib/data-processor';
-import { GPSData } from './types';
+import { GPSData, Dataset } from './types';
 import { Button, buttonVariants } from './components/ui/button';
 import { Slider } from './components/ui/slider';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './components/ui/card';
@@ -44,11 +44,10 @@ import LZString from 'lz-string';
 const TIMEZONE = 'Asia/Bangkok';
 
 export default function App() {
-  const [data, setData] = useState<GPSData[]>([]);
-  const [fileName, setFileName] = useState<string | null>(null);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [currentPlayTime, setCurrentPlayTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [speed, setSpeed] = useState(100); // ms per step
+  const [speed, setSpeed] = useState(100); 
   const [trailHours, setTrailHours] = useState(7);
   const [isPermanentTrail, setIsPermanentTrail] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -56,18 +55,79 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [followMarker, setFollowMarker] = useState(true);
   const [showHighTempLayer, setShowHighTempLayer] = useState(false);
-  const [focusedEventIndex, setFocusedEventIndex] = useState<number | null>(null);
+  const [focusedEventIndex, setFocusedEventIndex] = useState<{datasetId: string, eventIndex: number} | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [shareSuccess, setShareSuccess] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isPinned, setIsPinned] = useState(false);
+  const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null);
+
+  const COLORS = useMemo(() => [
+    '#ef4444', // Red
+    '#3b82f6', // Blue
+    '#22c55e', // Green
+    '#eab308', // Yellow
+    '#a855f7', // Purple
+    '#f97316', // Orange
+    '#06b6d4', // Cyan
+    '#ec4899', // Pink
+    '#84cc16', // Lime
+    '#6366f1'  // Indigo
+  ], []);
+
+  const timeRange = useMemo(() => {
+    if (datasets.length === 0) return { min: 0, max: 0 };
+    let min = Infinity;
+    let max = -Infinity;
+    datasets.forEach(d => {
+      if (d.data.length > 0) {
+        min = Math.min(min, d.data[0].time.getTime());
+        max = Math.max(max, d.data[d.data.length - 1].time.getTime());
+      }
+    });
+    return min === Infinity ? { min: 0, max: 0 } : { min, max };
+  }, [datasets]);
+
+  const activeDataset = useMemo(() => {
+    return datasets.find(d => d.id === activeDatasetId) || datasets[0] || null;
+  }, [datasets, activeDatasetId]);
+
+  const findPointAtTime = (dataset: GPSData[], time: number) => {
+    if (dataset.length === 0) return null;
+    let low = 0;
+    let high = dataset.length - 1;
+    
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const midTime = dataset[mid].time.getTime();
+      if (midTime === time) return dataset[mid];
+      if (midTime < time) low = mid + 1;
+      else high = mid - 1;
+    }
+    
+    if (low >= dataset.length) return dataset[dataset.length - 1];
+    if (high < 0) return dataset[0];
+    
+    const lowDiff = Math.abs(dataset[low].time.getTime() - time);
+    const highDiff = Math.abs(dataset[high].time.getTime() - time);
+    
+    return lowDiff < highDiff ? dataset[low] : dataset[high];
+  };
+
+  const currentPoints = useMemo(() => {
+    const points: Record<string, GPSData | null> = {};
+    datasets.forEach(d => {
+      points[d.id] = findPointAtTime(d.data, currentPlayTime);
+    });
+    return points;
+  }, [datasets, currentPlayTime]);
 
   const exportToHtml = () => {
-    if (data.length === 0) return;
+    if (!activeDataset) return;
     
-    const jsonData = JSON.stringify(data);
-    const title = fileName ? `TempRoute Viz - ${fileName}` : 'TempRoute Viz Export';
+    const jsonData = JSON.stringify(activeDataset.data);
+    const title = `TempRoute Viz - ${activeDataset.name}`;
     
     const htmlContent = `
 <!DOCTYPE html>
@@ -110,7 +170,7 @@ export default function App() {
     <div id="map"></div>
     <div class="info-panel">
         <h3 style="margin: 0 0 10px 0;">${title}</h3>
-        <p style="font-size: 12px; color: #666; margin: 0;">Total Points: ${data.length}</p>
+        <p style="font-size: 12px; color: #666; margin: 0;">Total Points: ${activeDataset.data.length}</p>
     </div>
     <div class="legend">
         <div class="legend-item"><div class="legend-color" style="background: #3b82f6;"></div> &lt; 20°C (Cool)</div>
@@ -174,7 +234,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = fileName ? `${fileName.split('.')[0]}_viz.html` : 'temproute_viz.html';
+    a.download = `${activeDataset.name.split('.')[0]}_viz.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -182,93 +242,96 @@ export default function App() {
   };
 
   const heatEvents = useMemo(() => {
-    if (data.length === 0) return [];
+    const allEvents: Record<string, any[]> = {};
     
-    const events: {
-      points: GPSData[];
-      startTime: Date;
-      endTime: Date;
-      durationMinutes: number;
-      minTemp: number;
-      maxTemp: number;
-      avgTemp: number;
-      locations: string[];
-      startIndex: number;
-    }[] = [];
-    
-    let currentSequence: GPSData[] = [];
-    let currentStartIndex = -1;
-    
-    const processSequence = (seq: GPSData[], startIndex: number) => {
-      if (seq.length > 1) {
-        const start = seq[0].time.getTime();
-        const end = seq[seq.length - 1].time.getTime();
-        const durationMinutes = (end - start) / (1000 * 60);
-        
-        if (durationMinutes >= 15) {
-          const temps = seq.map(p => p.temp);
-          const locations = Array.from(new Set(seq.map(p => p.location).filter(Boolean))) as string[];
-          events.push({
-            points: [...seq],
-            startTime: seq[0].time,
-            endTime: seq[seq.length - 1].time,
-            durationMinutes,
-            minTemp: Math.min(...temps),
-            maxTemp: Math.max(...temps),
-            avgTemp: temps.reduce((a, b) => a + b, 0) / temps.length,
-            locations,
-            startIndex
-          });
+    datasets.forEach(d => {
+      const data = d.data;
+      if (data.length === 0) return;
+      
+      const events: any[] = [];
+      let currentSequence: GPSData[] = [];
+      let currentStartIndex = -1;
+      
+      const processSequence = (seq: GPSData[], startIndex: number) => {
+        if (seq.length > 1) {
+          const start = seq[0].time.getTime();
+          const end = seq[seq.length - 1].time.getTime();
+          const durationMinutes = (end - start) / (1000 * 60);
+          
+          if (durationMinutes >= 15) {
+            const temps = seq.map(p => p.temp);
+            const locations = Array.from(new Set(seq.map(p => p.location).filter(Boolean))) as string[];
+            events.push({
+              points: [...seq],
+              startTime: seq[0].time,
+              endTime: seq[seq.length - 1].time,
+              durationMinutes,
+              minTemp: Math.min(...temps),
+              maxTemp: Math.max(...temps),
+              avgTemp: temps.reduce((a, b) => a + b, 0) / temps.length,
+              locations,
+              startIndex
+            });
+          }
+        }
+      };
+      
+      for (let i = 0; i < data.length; i++) {
+        const p = data[i];
+        if (p.temp > 30) {
+          if (currentSequence.length === 0) currentStartIndex = i;
+          currentSequence.push(p);
+        } else {
+          processSequence(currentSequence, currentStartIndex);
+          currentSequence = [];
+          currentStartIndex = -1;
         }
       }
-    };
+      processSequence(currentSequence, currentStartIndex);
+      allEvents[d.id] = events;
+    });
     
-    for (let i = 0; i < data.length; i++) {
-      const p = data[i];
-      if (p.temp > 30) {
-        if (currentSequence.length === 0) currentStartIndex = i;
-        currentSequence.push(p);
-      } else {
-        processSequence(currentSequence, currentStartIndex);
-        currentSequence = [];
-        currentStartIndex = -1;
-      }
-    }
-    processSequence(currentSequence, currentStartIndex);
-    
-    return events;
-  }, [data]);
+    return allEvents;
+  }, [datasets]);
 
   const goToNextHeatEvent = () => {
-    const nextEvent = heatEvents.find(e => e.startIndex > currentIndex);
+    if (!activeDataset) return;
+    const events = heatEvents[activeDataset.id] || [];
+    const nextEvent = events.find(e => e.startTime.getTime() > currentPlayTime);
     if (nextEvent) {
-      setCurrentIndex(nextEvent.startIndex);
+      setCurrentPlayTime(nextEvent.startTime.getTime());
       setIsPlaying(false);
     }
   };
 
   const goToPrevHeatEvent = () => {
-    const prevEvents = heatEvents.filter(e => e.startIndex < currentIndex);
+    if (!activeDataset) return;
+    const events = heatEvents[activeDataset.id] || [];
+    const prevEvents = events.filter(e => e.startTime.getTime() < currentPlayTime - 1000);
     if (prevEvents.length > 0) {
       const prevEvent = prevEvents[prevEvents.length - 1];
-      setCurrentIndex(prevEvent.startIndex);
+      setCurrentPlayTime(prevEvent.startTime.getTime());
       setIsPlaying(false);
     }
   };
 
   const stepForward = () => {
-    setCurrentIndex(prev => Math.min(prev + 1, data.length - 1));
+    setCurrentPlayTime(prev => Math.min(prev + 10000, timeRange.max));
     setIsPlaying(false);
   };
 
   const stepBackward = () => {
-    setCurrentIndex(prev => Math.max(prev - 1, 0));
+    setCurrentPlayTime(prev => Math.max(prev - 10000, timeRange.min));
     setIsPlaying(false);
   };
 
   const highTempPoints = useMemo(() => {
-    return heatEvents.flatMap(e => e.points);
-  }, [heatEvents]);
+    const points: Record<string, GPSData[]> = {};
+    datasets.forEach(d => {
+      points[d.id] = (heatEvents[d.id] || []).flatMap(e => e.points);
+    });
+    return points;
+  }, [datasets, heatEvents]);
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -358,10 +421,20 @@ export default function App() {
               });
             }
 
-            setData(restored);
-            if (encodedName) setFileName(decodeURIComponent(encodedName));
-            setCurrentIndex(0);
-            setIsPlaying(true);
+            if (restored.length > 0) {
+              const newDataset: Dataset = {
+                id: `shared-${Date.now()}`,
+                name: (encodedName ? decodeURIComponent(encodedName) : 'Shared Data'),
+                data: restored,
+                color: COLORS[0],
+                visible: true,
+                locationCol: 'Location'
+              };
+              setDatasets([newDataset]);
+              setActiveDatasetId(newDataset.id);
+              setCurrentPlayTime(restored[0].time.getTime());
+              setIsPlaying(true);
+            }
           }
         } catch (err) {
           console.error("Failed to load shared data", err);
@@ -377,14 +450,11 @@ export default function App() {
   }, []);
 
   const generateShareLink = () => {
-    if (data.length === 0) return;
+    if (!activeDataset) return;
     
     setIsSharing(true);
     try {
-      // ADVANCED COMPRESSION: Version 2
-      // Goal: Keep all points while staying under 5000 characters.
-      // Strategy: Delta encoding + Location mapping + Integer scaling.
-      
+      const dataToShare = activeDataset.data;
       const locations: string[] = [];
       const getLocIdx = (loc: string) => {
         let idx = locations.indexOf(loc);
@@ -395,12 +465,11 @@ export default function App() {
         return idx;
       };
 
-      // Base point values (integers for better compression)
-      const bLat = Math.round(data[0].lat * 1e6);
-      const bLong = Math.round(data[0].long * 1e6);
-      const bTime = data[0].time.getTime();
-      const bTemp = Math.round(data[0].temp * 10);
-      const bLocIdx = getLocIdx(data[0].location || "");
+      const bLat = Math.round(dataToShare[0].lat * 1e6);
+      const bLong = Math.round(dataToShare[0].long * 1e6);
+      const bTime = dataToShare[0].time.getTime();
+      const bTemp = Math.round(dataToShare[0].temp * 10);
+      const bLocIdx = getLocIdx(dataToShare[0].location || "");
 
       let lastLat = bLat;
       let lastLong = bLong;
@@ -408,12 +477,12 @@ export default function App() {
       let lastTemp = bTemp;
 
       const deltas = [];
-      for (let i = 1; i < data.length; i++) {
-        const curLat = Math.round(data[i].lat * 1e6);
-        const curLong = Math.round(data[i].long * 1e6);
-        const curTime = data[i].time.getTime();
-        const curTemp = Math.round(data[i].temp * 10);
-        const curLocIdx = getLocIdx(data[i].location || "");
+      for (let i = 1; i < dataToShare.length; i++) {
+        const curLat = Math.round(dataToShare[i].lat * 1e6);
+        const curLong = Math.round(dataToShare[i].long * 1e6);
+        const curTime = dataToShare[i].time.getTime();
+        const curTemp = Math.round(dataToShare[i].temp * 10);
+        const curLocIdx = getLocIdx(dataToShare[i].location || "");
 
         deltas.push([
           curLat - lastLat,
@@ -430,28 +499,21 @@ export default function App() {
       }
 
       const compactData = {
-        v: 2, // Version
-        ls: locations, // Location set
-        b: [bLat, bLong, bTime, bTemp], // Base point
-        bli: bLocIdx, // Base location index
-        d: deltas // Deltas
+        v: 2,
+        ls: locations,
+        b: [bLat, bLong, bTime, bTemp],
+        bli: bLocIdx,
+        d: deltas
       };
 
       const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(compactData));
-      
       const url = new URL(window.location.origin + window.location.pathname);
       const hashParams = new URLSearchParams();
       hashParams.set('d', compressed);
-      if (fileName) hashParams.set('n', fileName);
+      hashParams.set('n', activeDataset.name);
       
       url.hash = hashParams.toString();
-      const finalUrl = url.toString();
-      
-      if (finalUrl.length > 10000) {
-        setError(`The link is ${finalUrl.length} characters long. Some browsers may have issues.`);
-      }
-      
-      navigator.clipboard.writeText(finalUrl);
+      navigator.clipboard.writeText(url.toString());
       setShareSuccess(true);
       setTimeout(() => setShareSuccess(false), 3000);
     } catch (err) {
@@ -463,39 +525,91 @@ export default function App() {
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
     setIsLoading(true);
     setError(null);
-    setFileName(file.name);
+    
     try {
-      const rawData = await parseFile(file);
-      const { cleaned } = cleanGPSData(rawData);
+      const newDatasets: Dataset[] = [...datasets];
       
-      if (cleaned.length === 0) {
-        throw new Error("No valid GPS/Temperature data found in file.");
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (newDatasets.length >= 10) {
+          setError("Maximum of 10 files can be uploaded.");
+          break;
+        }
+        
+        const rawData = await parseFile(file);
+        const { cleaned, locationCol } = cleanGPSData(rawData);
+        
+        if (cleaned.length === 0) continue;
+        
+        newDatasets.push({
+          id: `${file.name}-${Date.now()}-${i}`,
+          name: file.name,
+          data: cleaned,
+          color: COLORS[newDatasets.length % COLORS.length],
+          visible: true,
+          locationCol
+        });
       }
       
-      setData(cleaned);
-      setCurrentIndex(0);
+      setDatasets(newDatasets);
+      if (newDatasets.length > 0 && !activeDatasetId) {
+        setActiveDatasetId(newDatasets[0].id);
+      }
+      
+      // Update playback range if it's the first upload
+      if (datasets.length === 0 && newDatasets.length > 0) {
+        let minTime = Infinity;
+        newDatasets.forEach(d => {
+          if (d.data.length > 0) minTime = Math.min(minTime, d.data[0].time.getTime());
+        });
+        setCurrentPlayTime(minTime);
+      }
+      
       setIsPlaying(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to process file");
+      setError(err instanceof Error ? err.message : "Failed to process files");
     } finally {
       setIsLoading(false);
+      // Reset input
+      e.target.value = '';
     }
   };
 
+  const resetPlayback = () => {
+    setCurrentPlayTime(timeRange.min);
+    setIsPlaying(false);
+  };
+
+  const removeDataset = (id: string) => {
+    setDatasets(prev => {
+      const filtered = prev.filter(d => d.id !== id);
+      if (activeDatasetId === id) {
+        setActiveDatasetId(filtered.length > 0 ? filtered[0].id : null);
+      }
+      return filtered;
+    });
+  };
+
+  const toggleDatasetVisibility = (id: string) => {
+    setDatasets(prev => prev.map(d => 
+      d.id === id ? { ...d, visible: !d.visible } : d
+    ));
+  };
+
   useEffect(() => {
-    if (isPlaying && data.length > 0 && !isDragging) {
+    if (isPlaying && datasets.length > 0 && !isDragging) {
       timerRef.current = setInterval(() => {
-        setCurrentIndex(prev => {
-          if (prev >= data.length - 1) {
+        setCurrentPlayTime(prev => {
+          if (prev >= timeRange.max) {
             setIsPlaying(false);
             return prev;
           }
-          return prev + 1;
+          return prev + 1000; // Increment by 1 second for simulation
         });
       }, speed);
     } else {
@@ -505,9 +619,9 @@ export default function App() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isPlaying, data.length, speed, isDragging]);
+  }, [isPlaying, datasets.length, speed, isDragging, timeRange.max]);
 
-  const currentPoint = data[currentIndex];
+  const activePoint = activeDatasetId ? currentPoints[activeDatasetId] : null;
 
   return (
     <div className={cn(
@@ -540,23 +654,14 @@ export default function App() {
           </div>
         </div>
 
-        {/* File Name Display - Center */}
-        {fileName && (
-          <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-2 px-4 py-1.5 rounded-full border bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in duration-300">
-            <FileText className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-xs font-bold truncate max-w-[150px] lg:max-w-[300px]">
-              {fileName}
-            </span>
-          </div>
-        )}
-
+        {/* Header Content Update */}
         <div className="flex items-center gap-2 md:gap-4">
-          {data.length > 0 && (
+          {datasets.length > 0 && (
             <Badge variant="secondary" className={cn(
               "hidden lg:flex border transition-colors duration-300",
               isDarkMode ? "bg-slate-800 text-slate-300 border-slate-700" : "bg-slate-100 text-slate-600 border-slate-200"
             )}>
-              {data.length} Points
+              {datasets.length} Vehicles
             </Badge>
           )}
           
@@ -569,22 +674,6 @@ export default function App() {
             {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </Button>
 
-          {data.length > 0 && (
-            <Button
-              variant={shareSuccess ? "default" : "outline"}
-              size="sm"
-              onClick={generateShareLink}
-              disabled={isSharing}
-              className={cn(
-                "flex items-center gap-2 transition-all h-8 md:h-9 px-2 md:px-3",
-                shareSuccess ? "bg-green-500 hover:bg-green-600 border-green-500 text-white" : (isDarkMode ? "border-slate-700 text-slate-300" : "border-slate-200")
-              )}
-            >
-              {shareSuccess ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
-              <span className="hidden sm:inline">{shareSuccess ? 'Copied!' : 'Share'}</span>
-            </Button>
-          )}
-
           <div className="relative">
             <Input
               type="file"
@@ -592,6 +681,7 @@ export default function App() {
               onChange={handleFileUpload}
               className="hidden"
               id="file-upload"
+              multiple
             />
             <label 
               htmlFor="file-upload" 
@@ -602,7 +692,7 @@ export default function App() {
               )}
             >
               <Upload className="w-4 h-4" />
-              <span className="hidden sm:inline">{data.length > 0 ? 'Change' : 'Upload'}</span>
+              <span className="hidden sm:inline">Add Vehicles</span>
             </label>
           </div>
         </div>
@@ -653,6 +743,71 @@ export default function App() {
               "text-xs font-bold uppercase tracking-wider mb-4 flex items-center gap-2",
               isDarkMode ? "text-slate-400" : "text-slate-500"
             )}>
+              <FileText className="w-3.5 h-3.5" />
+              Vehicles ({datasets.length})
+            </h2>
+            <div className="space-y-2 max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">
+              {datasets.map((d) => (
+                <div 
+                  key={d.id}
+                  className={cn(
+                    "flex items-center gap-2 p-2 rounded-lg border transition-all cursor-pointer",
+                    activeDatasetId === d.id 
+                      ? (isDarkMode ? "bg-slate-800 border-slate-700" : "bg-white border-blue-200 shadow-sm ring-1 ring-blue-100")
+                      : (isDarkMode ? "bg-slate-950/30 border-slate-800 hover:border-slate-700" : "bg-slate-50 border-transparent hover:border-slate-200")
+                  )}
+                  onClick={() => setActiveDatasetId(d.id)}
+                >
+                  <div 
+                    className="w-3 h-3 rounded-full shrink-0" 
+                    style={{ backgroundColor: d.color }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-bold truncate leading-tight">{d.name}</p>
+                    <p className="text-[9px] text-slate-500 font-medium">
+                      {d.data.length} pts • {currentPoints[d.id]?.temp.toFixed(1) || '--'}°C
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="w-6 h-6 rounded-md hover:bg-slate-200 dark:hover:bg-slate-800"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleDatasetVisibility(d.id);
+                      }}
+                    >
+                      {d.visible ? <Eye className="w-3 h-3 text-blue-500" /> : <EyeOff className="w-3 h-3 text-slate-400" />}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="w-6 h-6 rounded-md hover:bg-red-100 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-500"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeDataset(d.id);
+                      }}
+                    >
+                      <span className="text-xs">×</span>
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              {datasets.length === 0 && (
+                <div className="text-center py-6 px-4 border rounded-xl border-dashed border-slate-200 dark:border-slate-800">
+                  <Upload className="w-6 h-6 text-slate-300 mx-auto mb-2" />
+                  <p className="text-xs text-slate-400">No vehicles added yet</p>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section>
+            <h2 className={cn(
+              "text-xs font-bold uppercase tracking-wider mb-4 flex items-center gap-2",
+              isDarkMode ? "text-slate-400" : "text-slate-500"
+            )}>
               <Info className="w-3 h-3" />
               Playback Settings
             </h2>
@@ -671,7 +826,7 @@ export default function App() {
                     const v = Array.isArray(val) ? val[0] : val;
                     if (typeof v === 'number') setSpeed(v);
                   }}
-                  disabled={data.length === 0}
+                  disabled={datasets.length === 0}
                 />
               </div>
 
@@ -685,7 +840,7 @@ export default function App() {
                         checked={isPermanentTrail}
                         onCheckedChange={setIsPermanentTrail}
                         className="scale-75"
-                        disabled={data.length === 0}
+                        disabled={datasets.length === 0}
                       />
                       <Label htmlFor="permanent-trail" className="text-[10px] font-bold uppercase text-slate-400 cursor-pointer">Permanent</Label>
                     </div>
@@ -702,7 +857,7 @@ export default function App() {
                       const v = Array.isArray(val) ? val[0] : val;
                       if (typeof v === 'number') setTrailHours(v);
                     }}
-                    disabled={data.length === 0}
+                    disabled={datasets.length === 0}
                   />
                 )}
               </div>
@@ -727,7 +882,7 @@ export default function App() {
                   id="follow-marker"
                   checked={followMarker}
                   onCheckedChange={setFollowMarker}
-                  disabled={data.length === 0}
+                  disabled={datasets.length === 0}
                 />
               </div>
 
@@ -747,10 +902,10 @@ export default function App() {
                       setShowHighTempLayer(val);
                       if (!val) setFocusedEventIndex(null);
                     }}
-                    disabled={data.length === 0}
+                    disabled={datasets.length === 0}
                   />
                 </div>
-                {showHighTempLayer && data.length > 0 && heatEvents.length === 0 && (
+                {showHighTempLayer && datasets.length > 0 && activeDatasetId && (heatEvents[activeDatasetId]?.length || 0) === 0 && (
                   <div className="px-3 py-2 rounded-md bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-900/30 animate-in fade-in slide-in-from-top-1">
                     <p className="text-[10px] text-orange-600 dark:text-orange-400 font-medium flex items-center gap-1.5">
                       <Info className="w-3 h-3" />
@@ -759,20 +914,20 @@ export default function App() {
                   </div>
                 )}
 
-                {showHighTempLayer && heatEvents.length > 0 && (
+                {showHighTempLayer && activeDatasetId && heatEvents[activeDatasetId] && (
                   <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1 custom-scrollbar">
-                    {heatEvents.map((event, idx) => (
+                    {heatEvents[activeDatasetId].map((event, idx) => (
                       <button 
                         key={`event-${idx}`}
                         onClick={() => {
-                          setFocusedEventIndex(idx);
+                          setFocusedEventIndex({ datasetId: activeDatasetId, eventIndex: idx });
                           setFollowMarker(false);
                         }}
                         className={cn(
                           "w-full text-left p-3 rounded-lg border text-[10px] space-y-2 animate-in fade-in slide-in-from-right-2 transition-all hover:ring-2 hover:ring-orange-500/50",
                           isDarkMode 
-                            ? (focusedEventIndex === idx ? "bg-orange-900/20 border-orange-500/50" : "bg-slate-950/50 border-slate-800") 
-                            : (focusedEventIndex === idx ? "bg-orange-50 border-orange-200" : "bg-white border-slate-200")
+                            ? (focusedEventIndex?.datasetId === activeDatasetId && focusedEventIndex?.eventIndex === idx ? "bg-orange-900/20 border-orange-500/50" : "bg-slate-950/50 border-slate-800") 
+                            : (focusedEventIndex?.datasetId === activeDatasetId && focusedEventIndex?.eventIndex === idx ? "bg-orange-50 border-orange-200" : "bg-white border-slate-200")
                         )}
                       >
                         <div className="flex justify-between items-center border-b pb-1.5 mb-1.5 border-slate-100 dark:border-slate-800">
@@ -859,61 +1014,66 @@ export default function App() {
             </div>
           )}
 
-          {data.length > 0 ? (
+          {datasets.length > 0 ? (
             <>
-              {/* Current Point Top Bar */}
+              {/* Current Status Bar (Summary of all vehicles) */}
               <div className={cn(
-                "absolute top-4 left-1/2 -translate-x-1/2 z-[1000] backdrop-blur-md px-3 py-2 md:px-6 md:py-3 rounded-full border shadow-xl flex items-center gap-3 md:gap-10 transition-all duration-300 max-w-[95%] md:max-w-none",
-                isDarkMode ? "bg-slate-900/90 border-slate-800" : "bg-white/90 border-slate-200"
+                "absolute top-4 left-4 z-[1000] backdrop-blur-md rounded-2xl border shadow-xl flex flex-col p-4 gap-3 transition-all duration-300 max-w-[280px] w-full",
+                isDarkMode ? "bg-slate-900/90 border-slate-800" : "bg-white/90 border-blue-100"
               )}>
-                <div className="flex items-center gap-1.5 md:gap-2">
-                  <Clock className="w-3 h-3 md:w-3.5 md:h-3.5 text-slate-400" />
-                  <div className="flex flex-col">
-                    <span className="hidden md:block text-[8px] uppercase font-bold text-slate-500 leading-none mb-0.5">Time</span>
-                    <span className="text-[10px] md:text-xs font-mono font-bold leading-none">
-                      {formatInTimeZone(currentPoint.time, TIMEZONE, 'HH:mm:ss')}
+                <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-2 mb-1">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-slate-400" />
+                    <span className="text-xs font-mono font-bold tracking-tight">
+                      {formatInTimeZone(new Date(currentPlayTime), TIMEZONE, 'HH:mm:ss')}
                     </span>
                   </div>
+                  <Badge variant="outline" className="text-[9px] bg-slate-50 dark:bg-slate-800 h-5">
+                    {formatInTimeZone(new Date(currentPlayTime), TIMEZONE, 'dd/MM/yyyy')}
+                  </Badge>
                 </div>
-
-                <div className="flex items-center gap-1.5 md:gap-2">
-                  <Thermometer className={cn(
-                    "w-3 h-3 md:w-3.5 md:h-3.5 transition-colors duration-300",
-                    currentPoint.temp > 30 ? "text-red-500" : "text-slate-400"
-                  )} />
-                  <div className="flex flex-col">
-                    <span className="hidden md:block text-[8px] uppercase font-bold text-slate-500 leading-none mb-0.5">Temp</span>
-                    <span className={cn(
-                      "text-[10px] md:text-xs font-bold leading-none transition-colors duration-300",
-                      currentPoint.temp > 30 ? "text-red-500" : (isDarkMode ? "text-slate-100" : "text-slate-900")
-                    )}>
-                      {currentPoint.temp.toFixed(1)}°C
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 md:gap-2 max-w-[80px] sm:max-w-[150px] md:max-w-[300px]">
-                  <MapIcon className="w-3 h-3 md:w-3.5 md:h-3.5 text-blue-500" />
-                  <div className="flex flex-col overflow-hidden">
-                    <span className="hidden md:block text-[8px] uppercase font-bold text-slate-500 leading-none mb-0.5">Location</span>
-                    <span className="text-[9px] md:text-[10px] font-bold truncate leading-none">
-                      {currentPoint.location || 'N/A'}
-                    </span>
-                  </div>
+                
+                <div className="space-y-2.5 max-h-[200px] overflow-y-auto pr-1 custom-scrollbar">
+                  {datasets.filter(d => d.visible).map(d => {
+                    const point = currentPoints[d.id];
+                    return (
+                      <div key={d.id} className="flex items-center justify-between group">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
+                          <span className={cn(
+                            "text-[10px] font-bold truncate",
+                            activeDatasetId === d.id ? (isDarkMode ? "text-slate-100" : "text-slate-900") : "text-slate-500"
+                          )}>
+                            {d.name}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={cn(
+                            "text-[10px] font-mono font-bold",
+                            point && point.temp > 30 ? "text-red-500" : "text-slate-600 dark:text-slate-400"
+                          )}>
+                            {point ? `${point.temp.toFixed(1)}°C` : '--°C'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
               <MapDisplay 
-                data={data} 
-                currentIndex={currentIndex} 
+                datasets={datasets}
+                currentPlayTime={currentPlayTime}
+                currentPoints={currentPoints}
                 trailHours={trailHours} 
                 isPermanentTrail={isPermanentTrail}
                 followMarker={followMarker}
                 showHighTempLayer={showHighTempLayer}
                 highTempPoints={highTempPoints}
-                focusPoints={focusedEventIndex !== null ? heatEvents[focusedEventIndex]?.points : undefined}
+                focusPoints={focusedEventIndex ? heatEvents[focusedEventIndex.datasetId]?.[focusedEventIndex.eventIndex]?.points : undefined}
                 isDarkMode={isDarkMode}
-                resizeTrigger={`${isSidebarOpen}-${isPinned}`}
+                activeDatasetId={activeDatasetId}
+                resizeTrigger={`${isSidebarOpen}-${isPinned}-${datasets.length}`}
               />
               <Legend isDarkMode={isDarkMode} />
               
@@ -925,24 +1085,22 @@ export default function App() {
                 <div className="flex flex-col gap-2 md:gap-4">
                   <div className="flex justify-between items-center px-1 md:px-2">
                     <div className="flex flex-col">
-                      <span className="text-[8px] md:text-[10px] uppercase tracking-widest font-bold text-slate-400">Current Time</span>
-                      <div key={`time-${currentIndex}`} className={cn(
-                        "flex items-baseline gap-1 md:gap-2 transition-colors duration-300",
-                        currentPoint && currentPoint.temp > 30 ? "text-red-500" : (isDarkMode ? "text-slate-300" : "text-slate-600")
-                      )}>
-                        <span className="text-[10px] md:text-xs font-bold">
-                          {currentPoint ? formatInTimeZone(currentPoint.time, TIMEZONE, 'dd/MM') : '--/--'}
+                      <span className="text-[8px] md:text-[10px] uppercase tracking-widest font-bold text-slate-400">Timeline Scope</span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[10px] font-bold text-slate-400">
+                          {formatInTimeZone(new Date(timeRange.min), TIMEZONE, 'dd/MM HH:mm')}
                         </span>
-                        <span className="text-xs md:text-sm font-mono font-bold">
-                          {currentPoint ? formatInTimeZone(currentPoint.time, TIMEZONE, 'HH:mm:ss') : '--:--:--'}
+                        <div className="h-0.5 w-4 bg-slate-200 dark:bg-slate-800 rounded" />
+                        <span className="text-[10px] font-bold text-slate-400">
+                          {formatInTimeZone(new Date(timeRange.max), TIMEZONE, 'dd/MM HH:mm')}
                         </span>
                       </div>
                     </div>
                     <div className="flex flex-col items-end">
-                      <span className="text-[8px] md:text-[10px] uppercase tracking-widest font-bold text-slate-400">Progress</span>
-                      <span key={`progress-${currentIndex}`} className="text-xs md:text-sm font-mono font-bold">
-                        {Math.round((currentIndex / (data.length - 1)) * 100)}%
-                      </span>
+                      <span className="text-[8px] md:text-[10px] uppercase tracking-widest font-bold text-slate-400">Sync Status</span>
+                      <Badge variant="outline" className="text-[9px] border-green-500 text-green-500 bg-green-500/5">
+                        {datasets.length} Vehicles Calibrated
+                      </Badge>
                     </div>
                   </div>
 
@@ -952,12 +1110,12 @@ export default function App() {
                         variant="outline"
                         size="icon"
                         onClick={goToPrevHeatEvent}
-                        disabled={data.length === 0 || heatEvents.filter(e => e.startIndex < currentIndex).length === 0}
+                        disabled={datasets.length === 0}
                         className={cn(
                           "rounded-full w-7 h-7 md:w-10 md:h-10 shrink-0",
                           isDarkMode ? "border-slate-700 hover:bg-slate-800" : "border-slate-200"
                         )}
-                        title="Back Heat Event"
+                        title="Prev Heat Event (Active Vehicle)"
                       >
                         <SkipBack className="w-3 h-3 md:w-4 md:h-4" />
                       </Button>
@@ -966,7 +1124,7 @@ export default function App() {
                         variant="outline"
                         size="icon"
                         onClick={stepBackward}
-                        disabled={data.length === 0 || currentIndex === 0}
+                        disabled={datasets.length === 0}
                         className={cn(
                           "rounded-full w-7 h-7 md:w-10 md:h-10 shrink-0",
                           isDarkMode ? "border-slate-700 hover:bg-slate-800" : "border-slate-200"
@@ -979,8 +1137,8 @@ export default function App() {
                       <Button
                         variant="outline"
                         size="icon"
-                        onClick={() => setCurrentIndex(0)}
-                        disabled={data.length === 0}
+                        onClick={resetPlayback}
+                        disabled={datasets.length === 0}
                         className={cn(
                           "rounded-full w-7 h-7 md:w-10 md:h-10 shrink-0",
                           isDarkMode ? "border-slate-700 hover:bg-slate-800" : "border-slate-200"
@@ -998,7 +1156,7 @@ export default function App() {
                           !isPlaying ? 'bg-red-500 hover:bg-red-600 text-white' : (isDarkMode ? 'border-slate-700 hover:bg-slate-800' : 'border-slate-200')
                         )}
                         onClick={() => setIsPlaying(!isPlaying)}
-                        disabled={data.length === 0}
+                        disabled={datasets.length === 0}
                         title={isPlaying ? "Pause" : "Play"}
                       >
                         {isPlaying ? <Pause className="w-3 h-3 md:w-5 md:h-5" /> : <Play className="w-3 h-3 md:w-5 md:h-5 fill-current" />}
@@ -1008,7 +1166,7 @@ export default function App() {
                         variant="outline"
                         size="icon"
                         onClick={stepForward}
-                        disabled={data.length === 0 || currentIndex === data.length - 1}
+                        disabled={datasets.length === 0}
                         className={cn(
                           "rounded-full w-7 h-7 md:w-10 md:h-10 shrink-0",
                           isDarkMode ? "border-slate-700 hover:bg-slate-800" : "border-slate-200"
@@ -1022,25 +1180,26 @@ export default function App() {
                         variant="outline"
                         size="icon"
                         onClick={goToNextHeatEvent}
-                        disabled={data.length === 0 || !heatEvents.find(e => e.startIndex > currentIndex)}
+                        disabled={datasets.length === 0}
                         className={cn(
                           "rounded-full w-7 h-7 md:w-10 md:h-10 shrink-0",
                           isDarkMode ? "border-slate-700 hover:bg-slate-800" : "border-slate-200"
                         )}
-                        title="Next Heat Event"
+                        title="Next Heat Event (Active Vehicle)"
                       >
                         <SkipForward className="w-3 h-3 md:w-4 md:h-4" />
                       </Button>
                     </div>
                     <Slider
-                      value={[currentIndex]}
-                      min={0}
-                      max={data.length - 1}
-                      step={1}
+                      value={[currentPlayTime]}
+                      min={timeRange.min}
+                      max={timeRange.max}
+                      step={1000}
                       onValueChange={(val) => {
                         const v = Array.isArray(val) ? val[0] : val;
                         if (typeof v === 'number') {
-                          setCurrentIndex(v);
+                          setCurrentPlayTime(v);
+                          setIsPlaying(false);
                         }
                       }}
                       onPointerDown={() => {
@@ -1049,6 +1208,7 @@ export default function App() {
                       }}
                       onPointerUp={() => setIsDragging(false)}
                       className="flex-1"
+                      disabled={datasets.length === 0}
                     />
                   </div>
                 </div>

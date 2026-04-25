@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, Polyline, CircleMarker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { GPSData } from '../types';
+import { GPSData, Dataset } from '../types';
 import { getTempColor } from '../lib/data-processor';
 import { format } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
@@ -23,15 +23,17 @@ let DefaultIcon = L.icon({
 L.Marker.prototype.options.icon = DefaultIcon;
 
 interface MapDisplayProps {
-  data: GPSData[];
-  currentIndex: number;
+  datasets: Dataset[];
+  currentPlayTime: number;
+  currentPoints: Record<string, GPSData | null>;
   trailHours: number;
   isPermanentTrail: boolean;
   followMarker: boolean;
   showHighTempLayer: boolean;
-  highTempPoints: GPSData[];
+  highTempPoints: Record<string, GPSData[]>;
   focusPoints?: GPSData[];
   isDarkMode: boolean;
+  activeDatasetId: string | null;
   resizeTrigger?: any;
 }
 
@@ -67,8 +69,9 @@ const MapFocus: React.FC<{ points?: GPSData[] }> = ({ points }) => {
 };
 
 export const MapDisplay: React.FC<MapDisplayProps> = ({ 
-  data, 
-  currentIndex, 
+  datasets, 
+  currentPlayTime,
+  currentPoints,
   trailHours, 
   isPermanentTrail,
   followMarker, 
@@ -76,31 +79,20 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({
   highTempPoints,
   focusPoints,
   isDarkMode,
+  activeDatasetId,
   resizeTrigger
 }) => {
-  const currentPoint = data[currentIndex];
+  const visibleDatasets = useMemo(() => datasets.filter(d => d.visible), [datasets]);
   
-  const trailPoints = useMemo(() => {
-    if (!currentPoint) return [];
-    
-    if (isPermanentTrail) {
-      return data.slice(0, currentIndex + 1);
-    }
+  const activePoint = activeDatasetId ? currentPoints[activeDatasetId] : null;
+  const points: (GPSData | null)[] = Object.values(currentPoints);
+  const firstVisiblePoint = points.find(p => p !== null);
+  
+  const center: [number, number] = activePoint 
+    ? [activePoint.lat, activePoint.long] 
+    : (firstVisiblePoint ? [firstVisiblePoint.lat, firstVisiblePoint.long] : [13.7563, 100.5018]);
 
-    const endTime = currentPoint.time.getTime();
-    const startTime = endTime - trailHours * 60 * 60 * 1000;
-    
-    return data.filter(p => {
-      const t = p.time.getTime();
-      return t >= startTime && t <= endTime;
-    });
-  }, [data, currentIndex, trailHours, isPermanentTrail]);
-
-  if (!data.length) return null;
-
-  const center: [number, number] = currentPoint 
-    ? [currentPoint.lat, currentPoint.long] 
-    : [data[0].lat, data[0].long];
+  if (datasets.length === 0) return null;
 
   return (
     <div className={cn(
@@ -124,121 +116,108 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({
           }
         />
         
-        {/* High Temp Layer (Background) */}
-        {showHighTempLayer && highTempPoints.length > 0 && (
-          <>
-            {highTempPoints.map((p, i) => (
+        {/* High Temp Layers (Background) */}
+        {showHighTempLayer && visibleDatasets.map(d => {
+          const points = highTempPoints[d.id] || [];
+          return points.map((p, i) => (
+            <CircleMarker
+              key={`high-temp-${d.id}-${i}`}
+              center={[p.lat, p.long]}
+              radius={6}
+              pathOptions={{
+                fillColor: d.color,
+                color: '#FFD700',
+                weight: 1,
+                fillOpacity: 0.2,
+              }}
+            >
+              <Popup>
+                <div className="text-xs">
+                  <p className="font-bold underline" style={{ color: d.color }}>Vehicle: {d.name}</p>
+                  <p className="font-bold text-orange-600">High Temp Alert (&gt;30°C)</p>
+                  <p>Temp: {p.temp.toFixed(1)}°C</p>
+                  <p>Time: {formatInTimeZone(p.time, TIMEZONE, 'HH:mm:ss')}</p>
+                </div>
+              </Popup>
+            </CircleMarker>
+          ));
+        })}
+
+        {/* Trail Markers & Lines for each dataset */}
+        {visibleDatasets.map(d => {
+          const currentPoint = currentPoints[d.id];
+          if (!currentPoint) return null;
+
+          const endTime = currentPoint.time.getTime();
+          const startTime = isPermanentTrail ? d.data[0].time.getTime() : (endTime - trailHours * 60 * 60 * 1000);
+          
+          const trailPoints = d.data.filter(p => {
+            const t = p.time.getTime();
+            return t >= startTime && t <= endTime;
+          });
+
+          return (
+            <React.Fragment key={`dataset-trail-${d.id}`}>
+              {trailPoints.length > 0 && (
+                <>
+                  {trailPoints.map((p, i) => {
+                    const line = i > 0 ? (
+                      <Polyline
+                        key={`line-${d.id}-${i}`}
+                        positions={[
+                          [trailPoints[i-1].lat, trailPoints[i-1].long],
+                          [p.lat, p.long]
+                        ]}
+                        pathOptions={{
+                          color: d.color,
+                          weight: activeDatasetId === d.id ? 5 : 3,
+                          opacity: activeDatasetId === d.id ? 0.7 : 0.4,
+                          lineCap: 'round'
+                        }}
+                      />
+                    ) : null;
+
+                    return (
+                      <React.Fragment key={`point-${d.id}-${i}`}>
+                        {line}
+                      </React.Fragment>
+                    );
+                  })}
+                </>
+              )}
+
+              {/* Current Position Marker */}
               <CircleMarker
-                key={`high-temp-${i}`}
-                center={[p.lat, p.long]}
-                radius={8}
+                center={[currentPoint.lat, currentPoint.long]}
+                radius={activeDatasetId === d.id ? 10 : 7}
                 pathOptions={{
-                  fillColor: '#FF4500',
-                  color: '#FFD700',
-                  weight: 1,
-                  fillOpacity: 0.3,
+                  fillColor: d.color,
+                  color: activeDatasetId === d.id ? '#FFF' : d.color,
+                  weight: activeDatasetId === d.id ? 3 : 1,
+                  fillOpacity: 1
                 }}
               >
                 <Popup>
-                  <div className="text-xs">
-                    <p className="font-bold text-orange-600">High Temp Alert (&gt;30°C)</p>
-                    <p>Temp: {p.temp.toFixed(1)}°C</p>
-                    <p>Time: {formatInTimeZone(p.time, TIMEZONE, 'HH:mm:ss')}</p>
-                    <p>Date: {formatInTimeZone(p.time, TIMEZONE, 'dd/MM/yyyy')}</p>
+                  <div className="text-sm space-y-1">
+                    <p className="font-bold border-b pb-1 mb-1" style={{ color: d.color }}>
+                      {d.name}
+                    </p>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                      <span className="text-slate-500 dark:text-slate-400">Date:</span>
+                      <span className="font-medium dark:text-slate-200">{formatInTimeZone(currentPoint.time, TIMEZONE, 'dd/MM/yyyy')}</span>
+                      <span className="text-slate-500 dark:text-slate-400">Time:</span>
+                      <span className="font-medium dark:text-slate-200">{formatInTimeZone(currentPoint.time, TIMEZONE, 'HH:mm:ss')}</span>
+                      <span className="text-slate-500 dark:text-slate-400">Temp:</span>
+                      <span className="font-medium text-red-500">{currentPoint.temp.toFixed(1)}°C</span>
+                      <span className="text-slate-500 dark:text-slate-400">Location:</span>
+                      <span className="font-medium dark:text-slate-200 truncate max-w-[100px]">{currentPoint.location || 'N/A'}</span>
+                    </div>
                   </div>
                 </Popup>
               </CircleMarker>
-            ))}
-          </>
-        )}
-
-        {/* Trail Markers & Lines */}
-        {trailPoints.length > 0 && (
-          <>
-            {trailPoints.map((p, i) => {
-              // Draw line to previous point
-              const line = i > 0 ? (
-                <Polyline
-                  key={`trail-line-${i}`}
-                  positions={[
-                    [trailPoints[i-1].lat, trailPoints[i-1].long],
-                    [p.lat, p.long]
-                  ]}
-                  pathOptions={{
-                    color: getTempColor(p.temp),
-                    weight: 4,
-                    opacity: 0.6,
-                    lineCap: 'round'
-                  }}
-                />
-              ) : null;
-
-              return (
-                <React.Fragment key={`trail-group-${i}`}>
-                  {line}
-                  <CircleMarker
-                    center={[p.lat, p.long]}
-                    radius={4}
-                    pathOptions={{
-                      fillColor: getTempColor(p.temp),
-                      color: isDarkMode ? '#FFF' : '#000',
-                      weight: 1,
-                      fillOpacity: 0.8
-                    }}
-                  >
-                    <Popup>
-                      <div className="text-xs space-y-1">
-                        <p className="font-bold text-slate-900 dark:text-slate-100 border-b pb-1 mb-1">
-                          {p.location || 'Point Detail'}
-                        </p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-                          <span className="text-slate-500 dark:text-slate-400">Date:</span>
-                          <span className="font-medium dark:text-slate-200">{formatInTimeZone(p.time, TIMEZONE, 'dd/MM/yyyy')}</span>
-                          <span className="text-slate-500 dark:text-slate-400">Time:</span>
-                          <span className="font-medium dark:text-slate-200">{formatInTimeZone(p.time, TIMEZONE, 'HH:mm:ss')}</span>
-                          <span className="text-slate-500 dark:text-slate-400">Temp:</span>
-                          <span className="font-medium text-red-500">{p.temp.toFixed(1)}°C</span>
-                        </div>
-                      </div>
-                    </Popup>
-                  </CircleMarker>
-                </React.Fragment>
-              );
-            })}
-          </>
-        )}
-
-        {/* Current Position Marker */}
-        {currentPoint && (
-          <CircleMarker
-            center={[currentPoint.lat, currentPoint.long]}
-            radius={10}
-            pathOptions={{
-              fillColor: getTempColor(currentPoint.temp),
-              color: '#FFF',
-              weight: 3,
-              fillOpacity: 1
-            }}
-          >
-            <Popup>
-              <div className="text-sm space-y-1">
-                <p className="font-bold text-red-600 border-b pb-1 mb-1 flex items-center gap-1">
-                  <span>🔥</span> Latest Position
-                </p>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-                  <span className="text-slate-500 dark:text-slate-400">Date:</span>
-                  <span className="font-medium dark:text-slate-200">{formatInTimeZone(currentPoint.time, TIMEZONE, 'dd/MM/yyyy')}</span>
-                  <span className="text-slate-500 dark:text-slate-400">Time:</span>
-                  <span className="font-medium dark:text-slate-200">{formatInTimeZone(currentPoint.time, TIMEZONE, 'HH:mm:ss')}</span>
-                  <span className="text-slate-500 dark:text-slate-400">Temp:</span>
-                  <span className="font-medium text-red-500">{currentPoint.temp.toFixed(1)}°C</span>
-                  <span className="text-slate-500 dark:text-slate-400">Location:</span>
-                  <span className="font-medium dark:text-slate-200 truncate max-w-[100px]">{currentPoint.location || 'N/A'}</span>
-                </div>
-              </div>
-            </Popup>
-          </CircleMarker>
-        )}
+            </React.Fragment>
+          );
+        })}
 
         <MapAutoCenter center={center} enabled={followMarker} />
         <MapFocus points={focusPoints} />

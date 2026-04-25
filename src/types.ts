@@ -6,10 +6,11 @@ export interface GPSData {
   location?: string;
 }
 
-export interface MapPoint {
-  lat: number;
-  lng: number;
-  temp: number;
-  time: Date;
-  location?: string;
+export interface Dataset {
+  id: string;
+  name: string;
+  data: GPSData[];
+  color: string;
+  visible: boolean;
+  locationCol: string | null;
 }
