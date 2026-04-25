@@ -48,13 +48,13 @@ export default function App() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [currentPlayTime, setCurrentPlayTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1); 
+  const [playbackSpeed, setPlaybackSpeed] = useState(300); 
   const [trailHours, setTrailHours] = useState(7);
   const [isPermanentTrail, setIsPermanentTrail] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [followMarker, setFollowMarker] = useState(true);
+  const [followMarker, setFollowMarker] = useState(false);
   const [showHighTempLayer, setShowHighTempLayer] = useState(false);
   const [focusedEventIndex, setFocusedEventIndex] = useState<{datasetId: string, eventIndex: number} | null>(null);
   const [isDragging, setIsDragging] = useState(false);
