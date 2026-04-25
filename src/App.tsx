@@ -690,6 +690,22 @@ export default function App() {
             {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </Button>
 
+          {datasets.length > 0 && (
+            <Button
+              variant={shareSuccess ? "default" : "outline"}
+              size="sm"
+              onClick={generateShareLink}
+              disabled={isSharing}
+              className={cn(
+                "flex items-center gap-2 transition-all h-8 md:h-9 px-2 md:px-3",
+                shareSuccess ? "bg-green-500 hover:bg-green-600 border-green-500 text-white" : (isDarkMode ? "border-slate-700 text-slate-300" : "border-slate-200")
+              )}
+            >
+              {shareSuccess ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+              <span className="hidden sm:inline">{shareSuccess ? 'Copied!' : 'Share'}</span>
+            </Button>
+          )}
+
           <div className="relative">
             <Input
               type="file"
@@ -850,7 +866,7 @@ export default function App() {
                   disabled={datasets.length === 0}
                 />
                 <div className="flex justify-between text-[10px] text-slate-400 font-bold uppercase">
-                  <span>1x (Real Time)</span>
+                  <span>1x</span>
                   <span>600x</span>
                 </div>
               </div>
@@ -1143,7 +1159,7 @@ export default function App() {
                     <div className="flex flex-col items-end">
                       <span className="text-[8px] md:text-[10px] uppercase tracking-widest font-bold text-slate-400">Sync Status</span>
                       <Badge variant="outline" className="text-[9px] border-green-500 text-green-500 bg-green-500/5">
-                        {datasets.length} Vehicles Calibrated
+                        {datasets.length} Vehicles Selected
                       </Badge>
                     </div>
                   </div>
